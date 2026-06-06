@@ -86,7 +86,8 @@ class _SiloModuleState extends State<SiloModule> {
     required VoidCallback onCancel,
     bool alignRight = false,
   }) {
-    final TextStyle labelStyle = const TextStyle(fontSize: 13, color: Colors.black54);
+    final TextStyle labelStyle =
+        const TextStyle(fontSize: 13, color: Colors.black54);
     final TextStyle valueStyle =
         const TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
 
@@ -94,10 +95,8 @@ class _SiloModuleState extends State<SiloModule> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        if (!alignRight)
-          Text("$label:", style: labelStyle),
-        if (!alignRight)
-          const SizedBox(width: 10),
+        Text("$label:", style: labelStyle),
+        const SizedBox(width: 10),
         Flexible(
           fit: FlexFit.loose,
           child: editing
@@ -107,7 +106,7 @@ class _SiloModuleState extends State<SiloModule> {
                   textAlign: alignRight ? TextAlign.right : TextAlign.left,
                   style: valueStyle,
                   onSubmitted: (val) => onSubmit(val),
-                  onEditingComplete: onCancel, // click ra ngoài thì bỏ qua
+                  onEditingComplete: onCancel,
                 )
               : InkWell(
                   onTap: onTapEdit,
@@ -119,13 +118,10 @@ class _SiloModuleState extends State<SiloModule> {
                   ),
                 ),
         ),
-        if (alignRight) ...[
-          const SizedBox(width: 10),
-          Text("$label:", style: labelStyle),
-        ],
       ],
     );
   }
+
 
 
   void _toggleIndicator() {
