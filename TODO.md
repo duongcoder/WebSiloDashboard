@@ -1,14 +1,19 @@
-# TODO - Chỉnh giao diện theo Webmau.png
+# TODO - Silo Dashboard (SQL Server)
 
-## Mục tiêu
-- Cập nhật Flutter UI trong `lib/main.dart` để khớp header + sidebar + bố cục content như ảnh `lib/Webmau.png`.
+## Phase 1: Fix/build UI
+- [x] Khôi phục `lib/main.dart` về đúng bố cục (Header + Row sidebar | modules | plan).
+- [x] Đưa `lib/services/sql_service.dart` về trạng thái an toàn để project build được khi driver SQL chưa tương thích.
+- [ ] Xóa/giảm warning unused import và deprecation (không bắt buộc).
 
-## Các bước
-1. [ ] (Đã hiểu cấu trúc hiện tại) Đọc `lib/main.dart`, `lib/silo_module.dart` để xác định vị trí header/sidebar/content.
-2. [ ] Thêm asset cho `lib/Webmau.png` vào `pubspec.yaml`.
-3. [ ] Thiết kế lại layout tổng thể: thay `AppBar` hiện tại bằng header custom (theo ảnh).
-4. [ ] Thiết kế lại sidebar trái (theo ảnh): màu nền, header “Menu”, item icon/label/hover/selected.
-5. [x] Canh chỉnh bố cục content: vị trí 3 silo module + bảng thống kê, khoảng cách/padding/scroll.
-6. [x] Chạy `flutter analyze` và `flutter build web` để kiểm tra.
+## Phase 2: Kết nối SQL thật theo hướng Windows (không dùng API web)
+- [ ] Làm một local gateway/proxy chạy trên Windows.
+  - Gateway phải trả về JSON `List<Map<String,dynamic>>` đúng schema `Silo.fromMap`.
 
+## Phase 3: Kết nối cho Flutter Web (Chrome)
+- [ ] Vì browser không truy cập SQL Server trực tiếp, dùng **proxy local (localhost)** để web gọi.
+- [ ] Update `SqlService.fetchSilos()` để gọi localhost proxy (HTTP local).
+
+## Phase 4: Test
+- [ ] Chạy `flutter run -d chrome` và kiểm tra hiển thị 2 dòng: Silo1, Silo2.
+- [ ] Chạy `flutter run -d windows` (nếu muốn) và kiểm tra tương tự.
 
