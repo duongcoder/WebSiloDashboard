@@ -6,7 +6,7 @@ class Silo {
   final String indicatorPort;
   final double indicatorMaxLoad;
   final String controllerIp;
-  final String controllerPort;
+  final int controllerPort;
   final String controllerSn;
 
   Silo({
@@ -21,29 +21,17 @@ class Silo {
     required this.controllerSn,
   });
 
-  factory Silo.fromMap(Map<String, dynamic> map) {
-    double toDouble(dynamic v) {
-      if (v == null) return 0.0;
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString()) ?? 0.0;
-    }
-
-    String toStringOrEmpty(dynamic v) {
-      if (v == null) return '';
-      return v.toString();
-    }
-
+  factory Silo.fromJson(Map<String, dynamic> json) {
     return Silo(
-      id: toStringOrEmpty(map['id']),
-      weight: toDouble(map['weight']),
-      level: toDouble(map['level']),
-      indicatorId: toStringOrEmpty(map['indicatorId']),
-      indicatorPort: toStringOrEmpty(map['indicatorPort']),
-      indicatorMaxLoad: toDouble(map['indicatorMaxLoad']),
-      controllerIp: toStringOrEmpty(map['controllerIp']),
-      controllerPort: toStringOrEmpty(map['controllerPort']),
-      controllerSn: toStringOrEmpty(map['controllerSn']),
+      id: json['id'],
+      weight: (json['weight'] as num).toDouble(),
+      level: (json['level'] as num).toDouble(),
+      indicatorId: json['indicatorId'],
+      indicatorPort: json['indicatorPort'],
+      indicatorMaxLoad: (json['indicatorMaxLoad'] as num).toDouble(),
+      controllerIp: json['controllerIp'],
+      controllerPort: json['controllerPort'] as int,
+      controllerSn: json['controllerSn'],
     );
   }
 }
-

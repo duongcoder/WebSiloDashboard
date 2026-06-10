@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-
 import 'widgets/silo_module.dart';
+import 'models/silo.dart';
+import 'services/sql_service.dart';
+import 'package:signalr_core/signalr_core.dart' as signalr;
 
 void main() {
   runApp(const SiloDashboardApp());
@@ -28,6 +30,8 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = -1;
+  late signalr.HubConnection connection;
+  List<Silo> _silos = [];
 
   // ===== Warning table rows (data derived from silo modules) =====
   List<Map<String, String>> _getWarningRowsFromSilos({
@@ -67,6 +71,38 @@ class _DashboardPageState extends State<DashboardPage> {
         'status': status,
       };
     }).toList();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    initSignalR(); // gọi khi widget khởi tạo
+  }
+
+  Future<void> initSignalR() async {
+    connection = signalr.HubConnectionBuilder()
+        .withUrl('http://localhost:5294/siloHub') // 👈 đúng endpoint backend
+        .build();
+
+    // Lắng nghe sự kiện UpdateSilos từ backend
+    connection.on('UpdateSilos', (message) {
+      if (message != null && message.isNotEmpty) {
+        final List<dynamic> data = message[0] as List<dynamic>;
+        final silos = data.map((json) => Silo.fromJson(json)).toList();
+
+        setState(() {
+          _silos = silos;
+        });
+      }
+    });
+
+    await connection.start();
+
+    if (connection.state == signalr.HubConnectionState.connected) {
+      print('SignalR connected');
+    } else {
+      print('SignalR not connected: ${connection.state}');
+    }
   }
 
   Widget _buildWarningTableCard({
@@ -519,379 +555,368 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildSidebar(double sidebarWidth) {
+    return Container(
+      width: sidebarWidth,
+      margin: const EdgeInsets.only(top: 0),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.blue.shade100),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 78,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+              ),
+              gradient: LinearGradient(
+                colors: [Colors.blue.shade700, Colors.blue.shade500],
+              ),
+            ),
+            child: const Center(
+              child: Text(
+                'Menu',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+              children: [
+                _buildSidebarItem(
+                  icon: Icons.dashboard_customize,
+                  label: 'Tổng quan',
+                  index: 0,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(0, 'Tổng quan'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.storage,
+                  label: 'Giám sát silo',
+                  index: 1,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(1, 'Giám sát silo'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.autorenew,
+                  label: 'Kế hoạch bơm/xả',
+                  index: 2,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(2, 'Kế hoạch bơm/xả'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.history,
+                  label: 'Lịch sử',
+                  index: 3,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(3, 'Lịch sử'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.warning_amber_rounded,
+                  label: 'Cảnh báo',
+                  index: 4,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(4, 'Cảnh báo'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.description,
+                  label: 'Báo cáo',
+                  index: 5,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(5, 'Báo cáo'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.devices_other,
+                  label: 'Thiết bị',
+                  index: 6,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(6, 'Thiết bị'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.settings_applications,
+                  label: 'Cài đặt',
+                  index: 7,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(7, 'Cài đặt'),
+                ),
+                const SizedBox(height: 10),
+                _buildSidebarItem(
+                  icon: Icons.group,
+                  label: 'Quản lý người dùng',
+                  index: 8,
+                  selectedIndex: _selectedIndex,
+                  onTap: () => _select(8, 'Quản lý người dùng'),
+                ),
+              ],
+            ),
+          ),
+        ]
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, Color color) {
+    return Card(
+      color: color.withOpacity(0.1),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(value, style: const TextStyle(fontSize: 18)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const sidebarWidth = 280.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      body: Column(
-        children: [
-          // ===== Header (custom) =====
-          Container(
-            height: 76,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.9),
-              border: Border.all(color: Colors.blue.shade100),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 14,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.blue.shade700,
-                  ),
-                  child: const Icon(Icons.cloud, color: Colors.white, size: 22),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Silo Dashboard',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Giám sát & Điều khiển hệ thống cân định lượng',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
-                    ],
-                  ),
-                ),
-                const Row(
-                  children: [
-                    Icon(Icons.notifications, color: Colors.black54),
-                    SizedBox(width: 16),
-                    Icon(Icons.account_circle, color: Colors.black54),
-                  ],
-                ),
-              ],
-            ),
-          ),
+      body: _silos.isEmpty
+          ? FutureBuilder<List<Silo>>(
+              future: ApiService.fetchSilos(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text('No silos found'));
+                }
 
-          // ===== Body: sidebar | modules | plan =====
-          Expanded(
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
+                // Khi có dữ liệu ban đầu
+                _silos = snapshot.data!;
+                return _buildDashboard(sidebarWidth);
+              },
+            )
+          : _buildDashboard(sidebarWidth), // realtime cập nhật từ SignalR
+    );
+  }
+
+  Widget _buildDashboard(double sidebarWidth) {
+    return Column(
+      children: [
+        // ===== Header =====
+        Container(
+          height: 76,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.9),
+            border: Border.all(color: Colors.blue.shade100),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 14,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.blue.shade700,
+                ),
+                child: const Icon(Icons.cloud, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Sidebar (cố định bên trái)
-                    Container(
-                      width: sidebarWidth,
-                      margin: const EdgeInsets.only(top: 0),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.92),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.blue.shade100),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.03),
-                            blurRadius: 12,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            height: 78,
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(18),
-                                topRight: Radius.circular(18),
-                              ),
-                              gradient: LinearGradient(
-                                colors: [Colors.blue.shade700, Colors.blue.shade500],
-                              ),
-                            ),
-                            child: const Center(
-                              child: Text(
-                                'Menu',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: ListView(
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-                              children: [
-                                _buildSidebarItem(
-                                  icon: Icons.dashboard_customize,
-                                  label: 'Tổng quan',
-                                  index: 0,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(0, 'Tổng quan'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.storage,
-                                  label: 'Giám sát silo',
-                                  index: 1,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(1, 'Giám sát silo'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.autorenew,
-                                  label: 'Kế hoạch bơm/xả',
-                                  index: 2,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(2, 'Kế hoạch bơm/xả'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.history,
-                                  label: 'Lịch sử',
-                                  index: 3,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(3, 'Lịch sử'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.warning_amber_rounded,
-                                  label: 'Cảnh báo',
-                                  index: 4,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(4, 'Cảnh báo'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.description,
-                                  label: 'Báo cáo',
-                                  index: 5,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(5, 'Báo cáo'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.devices_other,
-                                  label: 'Thiết bị',
-                                  index: 6,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(6, 'Thiết bị'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.settings_applications,
-                                  label: 'Cài đặt',
-                                  index: 7,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(7, 'Cài đặt'),
-                                ),
-                                const SizedBox(height: 10),
-                                _buildSidebarItem(
-                                  icon: Icons.group,
-                                  label: 'Quản lý người dùng',
-                                  index: 8,
-                                  selectedIndex: _selectedIndex,
-                                  onTap: () => _select(8, 'Quản lý người dùng'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
+                    Text(
+                      'Silo Dashboard',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
-
-                    const SizedBox(width: 16),
-
-                    // Modules (có scroll theo chiều dọc)
-                    Expanded(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final maxWidth = constraints.maxWidth.isFinite
-                                    ? constraints.maxWidth
-                                    : 1200.0;
-                                final crossAxisCount = maxWidth >= 1200
-                                    ? 4
-                                    : (maxWidth >= 980
-                                        ? 3
-                                        : (maxWidth >= 720 ? 2 : 1));
-
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 12),
-                                  child: GridView.count(
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    shrinkWrap: true,
-                                    crossAxisCount: crossAxisCount,
-                                    crossAxisSpacing: 16,
-                                    mainAxisSpacing: 16,
-                                    childAspectRatio: 0.98,
-                                    children: const [
-                                      SiloModule(
-                                        name: 'Silo 1',
-                                        weight: 1200,
-                                        level: 0.7,
-                                        indicatorId: 'IND-001',
-                                        indicatorPort: 'COM3',
-                                        indicatorMaxLoad: 2000,
-                                        controllerIp: '192.168.0.10',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-001',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 2',
-                                        weight: 800,
-                                        level: 0.45,
-                                        indicatorId: 'IND-002',
-                                        indicatorPort: 'COM4',
-                                        indicatorMaxLoad: 1800,
-                                        controllerIp: '192.168.0.11',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-002',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 3',
-                                        weight: 1500,
-                                        level: 0.1,
-                                        indicatorId: 'IND-003',
-                                        indicatorPort: 'COM5',
-                                        indicatorMaxLoad: 2500,
-                                        controllerIp: '192.168.0.12',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-003',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 4',
-                                        weight: 980,
-                                        level: 0.25,
-                                        indicatorId: 'IND-004',
-                                        indicatorPort: 'COM6',
-                                        indicatorMaxLoad: 1900,
-                                        controllerIp: '192.168.0.13',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-004',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 5',
-                                        weight: 1320,
-                                        level: 0.55,
-                                        indicatorId: 'IND-005',
-                                        indicatorPort: 'COM7',
-                                        indicatorMaxLoad: 2100,
-                                        controllerIp: '192.168.0.14',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-005',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 6',
-                                        weight: 760,
-                                        level: 0.35,
-                                        indicatorId: 'IND-006',
-                                        indicatorPort: 'COM8',
-                                        indicatorMaxLoad: 1700,
-                                        controllerIp: '192.168.0.15',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-006',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 7',
-                                        weight: 1760,
-                                        level: 0.18,
-                                        indicatorId: 'IND-007',
-                                        indicatorPort: 'COM9',
-                                        indicatorMaxLoad: 2600,
-                                        controllerIp: '192.168.0.16',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-007',
-                                      ),
-                                      SiloModule(
-                                        name: 'Silo 8',
-                                        weight: 1040,
-                                        level: 0.78,
-                                        indicatorId: 'IND-008',
-                                        indicatorPort: 'COM10',
-                                        indicatorMaxLoad: 1950,
-                                        controllerIp: '192.168.0.17',
-                                        controllerPort: '502',
-                                        controllerSn: 'SN-008',
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Plan (cố định theo chiều dọc giống sidebar - không bị render xuống dưới)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 620),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
-                              child: const Text(
-                                'Kế hoạch Bơm',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
-                            _buildPumpPlanCard(),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
-                              child: const Text(
-                                'Kế hoạch Xả',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
-                            _buildDumpPlanCard(),
-                            _buildWarningTableCard(
-                              rows: _getWarningRowsFromSilos(
-                                silos: const [
-                                  {'name': 'Silo 1', 'level': 0.7},
-                                  {'name': 'Silo 2', 'level': 0.45},
-                                  {'name': 'Silo 3', 'level': 0.1},
-                                  {'name': 'Silo 4', 'level': 0.25},
-                                  {'name': 'Silo 5', 'level': 0.55},
-                                  {'name': 'Silo 6', 'level': 0.35},
-                                  {'name': 'Silo 7', 'level': 0.18},
-                                  {'name': 'Silo 8', 'level': 0.78},
-                                ],
-                                nowTimeLabel: 'Ngay hiện tại',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Giám sát & Điều khiển hệ thống cân định lượng',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ],
                 ),
               ),
+              const Row(
+                children: [
+                  Icon(Icons.notifications, color: Colors.black54),
+                  SizedBox(width: 16),
+                  Icon(Icons.account_circle, color: Colors.black54),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // ===== Body: sidebar | modules | plan =====
+        Expanded(
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Sidebar
+                  _buildSidebar(sidebarWidth),
+
+                  const SizedBox(width: 16),
+
+                  // Dashboard Stats | Modules | Plan (GridView realtime)
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ===== Dashboard Stats =====
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Row(
+                            children: [
+                              Expanded(child: _buildStatCard("Tổng khối lượng", "1,245.32 tấn", Colors.blue)),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildStatCard("Silo hoạt động", "22/24", Colors.green)),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildStatCard("Silo mức thấp", "3 silo", Colors.orange)),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildStatCard("Cảnh báo", "5 cảnh báo", Colors.red)),
+                              const SizedBox(width: 16),
+                              Expanded(child: _buildStatCard("Lượng ăn hôm nay", "18.52 tấn", Colors.purple)),
+                            ],
+                          ),
+                        ),
+
+                        // ===== Modules + Plan =====
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Modules
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final maxWidth = constraints.maxWidth.isFinite
+                                          ? constraints.maxWidth
+                                          : 1200.0;
+                                      final crossAxisCount = maxWidth >= 1200
+                                          ? 4
+                                          : (maxWidth >= 980
+                                              ? 3
+                                              : (maxWidth >= 720 ? 2 : 1));
+
+                                      return Padding(
+                                        padding: const EdgeInsets.only(right: 12),
+                                        child: GridView.count(
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          shrinkWrap: true,
+                                          crossAxisCount: crossAxisCount,
+                                          crossAxisSpacing: 16,
+                                          mainAxisSpacing: 16,
+                                          childAspectRatio: 0.98,
+                                          children: _silos.map((silo) {
+                                            return SiloModule(
+                                              name: silo.id,
+                                              weight: silo.weight,
+                                              level: silo.level,
+                                              indicatorId: silo.indicatorId,
+                                              indicatorPort: silo.indicatorPort,
+                                              indicatorMaxLoad: silo.indicatorMaxLoad,
+                                              controllerIp: silo.controllerIp,
+                                              controllerPort: silo.controllerPort,
+                                              controllerSn: silo.controllerSn,
+                                            );
+                                          }).toList(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+
+                              // Plan
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 620),
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
+                                        child: const Text(
+                                          'Kế hoạch Bơm',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                        ),
+                                      ),
+                                      _buildPumpPlanCard(),
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
+                                        child: const Text(
+                                          'Kế hoạch Xả',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                        ),
+                                      ),
+                                      _buildDumpPlanCard(),
+                                      _buildWarningTableCard(
+                                        rows: _getWarningRowsFromSilos(
+                                          silos: _silos.map((s) => {
+                                            'name': s.id,
+                                            'level': s.level,
+                                          }).toList(),
+                                          nowTimeLabel: 'Ngay hiện tại',
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ), 
+                ],
+              ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
-

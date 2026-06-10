@@ -11,7 +11,7 @@ class SiloModule extends StatefulWidget {
   final double indicatorMaxLoad;
 
   final String controllerIp;
-  final String controllerPort;
+  final int controllerPort;
   final String controllerSn;
 
   const SiloModule({
@@ -68,7 +68,7 @@ class _SiloModuleState extends State<SiloModule> {
         TextEditingController(text: widget.indicatorMaxLoad.toString());
 
     _controllerIpController = TextEditingController(text: widget.controllerIp);
-    _controllerPortController = TextEditingController(text: widget.controllerPort);
+    _controllerPortController = TextEditingController(text: widget.controllerPort.toString());
     _controllerSnController = TextEditingController(text: widget.controllerSn);
   }
 
