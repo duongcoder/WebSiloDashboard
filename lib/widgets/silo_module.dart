@@ -4,6 +4,9 @@ import '../models/controller.dart';
 import '../models/silo.dart';
 import 'indicator_module.dart';
 import 'controller_module.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class SiloModule extends StatefulWidget {
   final String id;
@@ -32,6 +35,7 @@ class SiloModule extends StatefulWidget {
 class _SiloModuleState extends State<SiloModule> {
   bool _indicatorExpanded = false;
   bool _controllerExpanded = false;
+  double? _currentWeight;
 
   late final TextEditingController _pumpWeightController;
   late final TextEditingController _pumpTimeController;
@@ -42,7 +46,27 @@ class _SiloModuleState extends State<SiloModule> {
     super.initState();
     _pumpWeightController = TextEditingController();
     _pumpTimeController = TextEditingController();
+    Timer.periodic(const Duration(seconds: 0), (timer) {
+      _loadScaleValue();
+    });
   }
+
+  Future<void> _loadScaleValue() async {
+    try {
+      final response = await http.get(
+        Uri.parse("http://127.0.0.1:5294/api/Scales/GetScaleValue?id=1"),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _currentWeight = (data['value'] as num).toDouble();
+        });
+      }
+    } catch (e) {
+      debugPrint("Error: $e");
+    }
+  }
+
 
   Color getLevelColor() {
     if (widget.level > 0.5) return Colors.green;
@@ -353,12 +377,19 @@ class _SiloModuleState extends State<SiloModule> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  widget.currentWeight != null
-                                      ? '${widget.currentWeight!.toStringAsFixed(1)} kg'
+                                  _currentWeight != null
+                                      ? '${_currentWeight!.toStringAsFixed(1)} kg'
                                       : 'Đang tải...',
                                   style: const TextStyle(fontSize: 16, color: Colors.black87),
                                   textAlign: TextAlign.center,
                                 ),
+                                // Text(
+                                //   widget.currentWeight != null
+                                //       ? '${widget.currentWeight!.toStringAsFixed(1)} kg'
+                                //       : 'Đang tải...',
+                                //   style: const TextStyle(fontSize: 16, color: Colors.black87),
+                                //   textAlign: TextAlign.center,
+                                // ),
                                 const SizedBox(height: 16),
                                 Column(
                                   children: [

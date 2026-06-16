@@ -84,15 +84,15 @@ namespace Backend.Controllers
             }
 
             // Parse JSON trước khi gửi qua Hub
-            var jsonDoc = JsonDocument.Parse(scaleResponse.Content!);
-            var scaleValue = jsonDoc.RootElement.GetProperty("value").GetDouble();
+            // var jsonDoc = JsonDocument.Parse(scaleResponse.Content!);
+            // var scaleValue = jsonDoc.RootElement.GetProperty("value").GetDouble();
 
-            await _hubContext.Clients.All.SendAsync("ReceiveScaleValue", new Dictionary<string, object>
-            {
-                { "value", scaleValue }
-            });
+            // await _hubContext.Clients.All.SendAsync("ReceiveScaleValue", new Dictionary<string, object>
+            // {
+            //     { "value", scaleValue }
+            // });
 
-            _logger.LogInformation("Scale value {val} sent to Hub", scaleValue);
+            // _logger.LogInformation("Scale value {val} sent to Hub", scaleValue);
 
             return Content(scaleResponse.Content!, "application/json");
         }

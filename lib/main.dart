@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:signalr_core/signalr_core.dart';
+import 'dart:async';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
@@ -44,6 +46,10 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Silo> _silos = [];
   List<Controller> _controllers = [];
   List<Indicator> _indicators = [];
+
+  // Kế hoạch bơm realtime
+  List<Map<String, String>> _pumpPlanRows = [];
+  Timer? _pumpTimer;
 
   // ===== Warning table rows (từ DB Silos mới) =====
   List<Map<String, String>> _getWarningRowsFromSilos({
@@ -89,6 +95,50 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadIndicators();
     _loadControllers();
     _loadScales();
+
+    // Timer gọi API kế hoạch bơm mỗi 5 giây
+    _pumpTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      _fetchPumpPlan();
+    });
+  }
+
+  Future<void> _fetchPumpPlan() async {
+    try {
+      final response = await http.get(
+        Uri.parse("http://14.232.245.56:8089/api/AccessControl/PostScheduler"),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List<dynamic> schedulers = data['schedulers'];
+
+        setState(() {
+          _pumpPlanRows = schedulers.map((item) {
+            return {
+              'time': (item['timeStart'] ?? '').toString(),
+              'silo': 'Silo ${item['id_relay']}',
+              'material': (item['des'] ?? '').toString(),
+              'qty': (item['weight'] ?? '').toString(),
+              'status': _mapStatus(item['status']).toString(),
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching pump plan: $e");
+    }
+  }
+
+  String _mapStatus(int status) {
+    switch (status) {
+      case 0:
+        return 'Sẵn sàng';
+      case 1:
+        return 'Đang bơm';
+      case 2:
+        return 'Đã xong';
+      default:
+        return 'Chờ';
+    }
   }
 
   Future<void> _initSignalR() async {
@@ -133,24 +183,19 @@ class _DashboardPageState extends State<DashboardPage> {
       debugPrint("SignalR raw args: $args");
 
       final raw = args[0];
+      debugPrint("raw runtimeType: ${raw.runtimeType}");
+      debugPrint("raw content: $raw");
 
-      // Trường hợp backend gửi object JSON
       if (raw is Map<String, dynamic>) {
         setState(() {
           _currentWeight = (raw['value'] as num).toDouble();
         });
-      }
-
-      // Trường hợp backend gửi chuỗi JSON
-      else if (raw is String) {
+      } else if (raw is String) {
         final data = jsonDecode(raw);
         setState(() {
           _currentWeight = (data['value'] as num).toDouble();
         });
-      }
-
-      // Nếu backend gửi thẳng số
-      else if (raw is num) {
+      } else if (raw is num) {
         setState(() {
           _currentWeight = raw.toDouble();
         });
@@ -178,6 +223,13 @@ class _DashboardPageState extends State<DashboardPage> {
     // Bắt đầu kết nối
     await hubConnection.start();
     debugPrint("Hub started");
+  }
+
+  @override
+  void dispose() {
+    _pumpTimer?.cancel();
+    hubConnection.stop();
+    super.dispose();
   }
 
   Future<void> _loadScales() async {
@@ -310,43 +362,43 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  final List<Map<String, String>> _pumpPlanRows = [
-    {
-      'time': '08:00 - 08:30',
-      'silo': 'Silo 1',
-      'material': 'Thóc',
-      'qty': '500',
-      'status': 'Sẵn sàng',
-    },
-    {
-      'time': '08:30 - 09:00',
-      'silo': 'Silo 2',
-      'material': 'Bắp',
-      'qty': '320',
-      'status': 'Chờ',
-    },
-    {
-      'time': '09:00 - 09:30',
-      'silo': 'Silo 3',
-      'material': 'Gạo',
-      'qty': '450',
-      'status': 'Lỗi',
-    },
-    {
-      'time': '09:30 - 10:00',
-      'silo': 'Silo 4',
-      'material': 'Cám',
-      'qty': '250',
-      'status': 'Đang bơm',
-    },
-    {
-      'time': '10:00 - 10:30',
-      'silo': 'Silo 5',
-      'material': 'Đậu',
-      'qty': '600',
-      'status': 'Đã xong',
-    },
-  ];
+  // final List<Map<String, String>> _pumpPlanRows = [
+  //   {
+  //     'time': '08:00 - 08:30',
+  //     'silo': 'Silo 1',
+  //     'material': 'Thóc',
+  //     'qty': '500',
+  //     'status': 'Sẵn sàng',
+  //   },
+  //   {
+  //     'time': '08:30 - 09:00',
+  //     'silo': 'Silo 2',
+  //     'material': 'Bắp',
+  //     'qty': '320',
+  //     'status': 'Chờ',
+  //   },
+  //   {
+  //     'time': '09:00 - 09:30',
+  //     'silo': 'Silo 3',
+  //     'material': 'Gạo',
+  //     'qty': '450',
+  //     'status': 'Lỗi',
+  //   },
+  //   {
+  //     'time': '09:30 - 10:00',
+  //     'silo': 'Silo 4',
+  //     'material': 'Cám',
+  //     'qty': '250',
+  //     'status': 'Đang bơm',
+  //   },
+  //   {
+  //     'time': '10:00 - 10:30',
+  //     'silo': 'Silo 5',
+  //     'material': 'Đậu',
+  //     'qty': '600',
+  //     'status': 'Đã xong',
+  //   },
+  // ];
 
   final List<Map<String, String>> _dumpPlanRows = [
     {
@@ -514,10 +566,10 @@ class _DashboardPageState extends State<DashboardPage> {
                     final result = await showDialog<Map<String, String>>(
                       context: context,
                       builder: (dialogContext) {
-                        final timeController = TextEditingController(text: '');
-                        final siloController = TextEditingController(text: '');
-                        final materialController = TextEditingController(text: '');
-                        final qtyController = TextEditingController(text: '');
+                        final timeController = TextEditingController();
+                        final siloController = TextEditingController();
+                        final materialController = TextEditingController();
+                        final qtyController = TextEditingController();
                         final statusController = TextEditingController(text: 'Chờ');
 
                         return AlertDialog(
@@ -673,6 +725,192 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+
+  // Widget _buildPlanCard({
+  //   required String title,
+  //   required List<Map<String, String>> rows,
+  //   required String addSnackBarText,
+  //   required String deleteSnackBarText,
+  // }) {
+  //   return Card(
+  //     elevation: 4,
+  //     margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+  //     child: Column(
+  //       crossAxisAlignment: CrossAxisAlignment.stretch,
+  //       children: [
+  //         Padding(
+  //           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+  //           child: Row(
+  //             children: [
+  //               Text(
+  //                 title,
+  //                 style: const TextStyle(fontWeight: FontWeight.w700),
+  //               ),
+  //               const Spacer(),
+  //               ElevatedButton.icon(
+  //                 onPressed: () async {
+  //                   final result = await showDialog<Map<String, String>>(
+  //                     context: context,
+  //                     builder: (dialogContext) {
+  //                       final timeController = TextEditingController(text: '');
+  //                       final siloController = TextEditingController(text: '');
+  //                       final materialController = TextEditingController(text: '');
+  //                       final qtyController = TextEditingController(text: '');
+  //                       final statusController = TextEditingController(text: 'Chờ');
+
+  //                       return AlertDialog(
+  //                         title: const Text('Thêm kế hoạch'),
+  //                         content: SingleChildScrollView(
+  //                           child: Column(
+  //                             children: [
+  //                               TextField(
+  //                                 controller: timeController,
+  //                                 decoration: const InputDecoration(labelText: 'Thời gian'),
+  //                               ),
+  //                               TextField(
+  //                                 controller: siloController,
+  //                                 decoration: const InputDecoration(labelText: 'Silo'),
+  //                               ),
+  //                               TextField(
+  //                                 controller: materialController,
+  //                                 decoration: const InputDecoration(labelText: 'Nguyên liệu'),
+  //                               ),
+  //                               TextField(
+  //                                 controller: qtyController,
+  //                                 keyboardType: TextInputType.number,
+  //                                 decoration: const InputDecoration(labelText: 'Số lượng'),
+  //                               ),
+  //                               TextField(
+  //                                 controller: statusController,
+  //                                 decoration: const InputDecoration(labelText: 'Trạng thái'),
+  //                               ),
+  //                             ],
+  //                           ),
+  //                         ),
+  //                         actions: [
+  //                           TextButton(
+  //                             onPressed: () => Navigator.of(dialogContext).pop(),
+  //                             child: const Text('Hủy'),
+  //                           ),
+  //                           ElevatedButton(
+  //                             onPressed: () {
+  //                               Navigator.of(dialogContext).pop({
+  //                                 'time': timeController.text.trim(),
+  //                                 'silo': siloController.text.trim(),
+  //                                 'material': materialController.text.trim(),
+  //                                 'qty': qtyController.text.trim(),
+  //                                 'status': statusController.text.trim(),
+  //                               });
+  //                             },
+  //                             child: const Text('Thêm'),
+  //                           ),
+  //                         ],
+  //                       );
+  //                     },
+  //                   );
+
+  //                   if (result == null) return;
+
+  //                   final time = result['time'] ?? '';
+  //                   final silo = result['silo'] ?? '';
+  //                   final material = result['material'] ?? '';
+  //                   final qty = result['qty'] ?? '';
+  //                   final status = result['status'] ?? '';
+
+  //                   if (time.isEmpty || silo.isEmpty || material.isEmpty || qty.isEmpty || status.isEmpty) {
+  //                     ScaffoldMessenger.of(context).showSnackBar(
+  //                       const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
+  //                     );
+  //                     return;
+  //                   }
+
+  //                   setState(() {
+  //                     rows.add({
+  //                       'time': time,
+  //                       'silo': silo,
+  //                       'material': material,
+  //                       'qty': qty,
+  //                       'status': status,
+  //                     });
+  //                   });
+
+  //                   ScaffoldMessenger.of(context).showSnackBar(
+  //                     SnackBar(content: Text(addSnackBarText)),
+  //                   );
+  //                 },
+  //                 icon: const Icon(Icons.add),
+  //                 label: const Text('Thêm kế hoạch'),
+  //               ),
+  //             ],
+  //           ),
+  //         ),
+
+  //         SingleChildScrollView(
+  //           scrollDirection: Axis.horizontal,
+  //           child: Padding(
+  //             padding: const EdgeInsets.all(12.0),
+  //             child: DataTable(
+  //               headingRowColor: WidgetStateProperty.resolveWith(
+  //                 (states) => Colors.blue.shade50,
+  //               ),
+  //               dataRowMinHeight: 44,
+  //               columnSpacing: 24,
+  //               columns: const [
+  //                 DataColumn(label: Text('Thời gian')),
+  //                 DataColumn(label: Text('Silo')),
+  //                 DataColumn(label: Text('Nguyên liệu')),
+  //                 DataColumn(label: Text('Số lượng'), numeric: true),
+  //                 DataColumn(label: Text('Trạng thái')),
+  //                 DataColumn(label: Text('Xóa')),
+  //               ],
+  //               rows: List<DataRow>.generate(rows.length, (index) {
+  //                 final row = rows[index];
+  //                 final status = row['status'] ?? '';
+
+  //                 return DataRow(
+  //                   cells: [
+  //                     DataCell(Text(row['time'] ?? '')),
+  //                     DataCell(Text(row['silo'] ?? '')),
+  //                     DataCell(Text(row['material'] ?? '')),
+  //                     DataCell(Text(row['qty'] ?? '')),
+  //                     DataCell(
+  //                       Container(
+  //                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  //                         decoration: BoxDecoration(
+  //                           color: _statusColor(status),
+  //                           borderRadius: BorderRadius.circular(8),
+  //                         ),
+  //                         child: Text(
+  //                           status,
+  //                           style: const TextStyle(fontSize: 12),
+  //                         ),
+  //                       ),
+  //                     ),
+  //                     DataCell(
+  //                       IconButton(
+  //                         tooltip: 'Xóa kế hoạch',
+  //                         icon: const Icon(Icons.delete_forever, color: Colors.red),
+  //                         onPressed: () {
+  //                           setState(() {
+  //                             rows.removeAt(index);
+  //                           });
+
+  //                           ScaffoldMessenger.of(context).showSnackBar(
+  //                             SnackBar(content: Text(deleteSnackBarText)),
+  //                           );
+  //                         },
+  //                       ),
+  //                     ),
+  //                   ],
+  //                 );
+  //               }),
+  //             ),
+  //           ),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 
   Widget _buildSidebar(double sidebarWidth) {
     return Container(
