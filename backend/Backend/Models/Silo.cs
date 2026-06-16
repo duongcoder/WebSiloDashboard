@@ -11,11 +11,5 @@ namespace Backend.Models
 
         public double Weight { get; set; }
         public double Level { get; set; }
-        public string IndicatorId { get; set; } = string.Empty;
-        public string IndicatorPort { get; set; } = string.Empty;
-        public double IndicatorMaxLoad { get; set; }
-        public string ControllerIp { get; set; } = string.Empty;
-        public int ControllerPort { get; set; }
-        public string ControllerSn { get; set; } = string.Empty;
     }
 }

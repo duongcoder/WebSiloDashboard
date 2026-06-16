@@ -11,5 +11,9 @@ namespace Backend.Data
         }
 
         public DbSet<Silo> Silos { get; set; } = null!;
+
+        public DbSet<Indicator> Indicators { get; set; } = null!;
+
+        public DbSet<Controller> Controllers { get; set; } = null!;
     }
 }

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.NewtonsoftJson;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Backend.Data;   // nơi chứa SiloDbContext
@@ -17,7 +19,11 @@ namespace Backend
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
             // Đăng ký Controllers
-            builder.Services.AddControllers();
+            builder.Services.AddControllers()
+                .AddNewtonsoftJson(options =>
+                {
+                    options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+                });
 
             // Đăng ký Swagger
             builder.Services.AddEndpointsApiExplorer();
@@ -47,8 +53,8 @@ namespace Backend
             // Middleware pipeline
             app.UseHttpsRedirection();
             app.UseRouting();
-            app.UseAuthorization();
             app.UseCors("AllowAll");
+            app.UseAuthorization();
 
             // Swagger middleware
             app.UseSwagger();
@@ -58,14 +64,15 @@ namespace Backend
                 c.RoutePrefix = string.Empty; // Swagger UI ngay tại http://localhost:5294
             });
 
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapControllers();
-                endpoints.MapHub<SiloHub>("/siloHub"); // 👈 endpoint cho SignalR
-            });
+            // app.UseEndpoints(endpoints =>
+            // {
+            //     endpoints.MapControllers();
+            //     endpoints.MapHub<SiloHub>("/siloHub"); // 👈 endpoint cho SignalR
+            // });
 
-            // Map controllers
+            // Map controllers và SignalR Hub
             app.MapControllers();
+            app.MapHub<SiloHub>("/siloHub");
 
             app.Run();
         }

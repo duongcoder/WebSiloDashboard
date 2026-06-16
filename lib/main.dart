@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
-import 'widgets/silo_module.dart';
+import 'package:signalr_core/signalr_core.dart';
+import 'dart:convert';
+import 'models/controller.dart';
+import 'models/indicator.dart';
 import 'models/silo.dart';
 import 'services/sql_service.dart';
-import 'package:signalr_core/signalr_core.dart' as signalr;
+import 'services/scale_service.dart';
+import 'widgets/silo_module.dart';
+import 'widgets/indicator_module.dart';
+import 'widgets/controller_module.dart';
+
 
 void main() {
   runApp(const SiloDashboardApp());
@@ -30,12 +37,17 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = -1;
-  late signalr.HubConnection connection;
-  List<Silo> _silos = [];
+  late HubConnection hubConnection;
+  double? _currentWeight;
 
-  // ===== Warning table rows (data derived from silo modules) =====
+  // Data từ backend
+  List<Silo> _silos = [];
+  List<Controller> _controllers = [];
+  List<Indicator> _indicators = [];
+
+  // ===== Warning table rows (từ DB Silos mới) =====
   List<Map<String, String>> _getWarningRowsFromSilos({
-    required List<Map<String, dynamic>> silos,
+    required List<Silo> silos,
     required String nowTimeLabel,
   }) {
     String statusByLevel(double level) {
@@ -57,18 +69,14 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return silos.map((silo) {
-      final name = (silo['name'] as String?) ?? '';
-      final level = (silo['level'] as double?) ?? 0.0;
-      final status = statusByLevel(level);
-      final severity = severityByLevel(level);
-      final content = contentByLevel(level);
-
+      final name = silo.id;
+      final level = silo.level;
       return {
         'time': nowTimeLabel,
         'silo': name,
-        'content': content,
-        'severity': severity,
-        'status': status,
+        'content': contentByLevel(level),
+        'severity': severityByLevel(level),
+        'status': statusByLevel(level),
       };
     }).toList();
   }
@@ -76,32 +84,143 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    initSignalR(); // gọi khi widget khởi tạo
+    _initSignalR();
+    _loadSilos();
+    _loadIndicators();
+    _loadControllers();
+    _loadScales();
   }
 
-  Future<void> initSignalR() async {
-    connection = signalr.HubConnectionBuilder()
-        .withUrl('http://localhost:5294/siloHub') // 👈 đúng endpoint backend
+  Future<void> _initSignalR() async {
+    hubConnection = HubConnectionBuilder()
+        .withUrl("http://localhost:5294/siloHub")
         .build();
 
-    // Lắng nghe sự kiện UpdateSilos từ backend
-    connection.on('UpdateSilos', (message) {
-      if (message != null && message.isNotEmpty) {
-        final List<dynamic> data = message[0] as List<dynamic>;
-        final silos = data.map((json) => Silo.fromJson(json)).toList();
+    // Lắng nghe sự kiện UpdateSilos
+    // hubConnection.on("UpdateSilos", (args) {
+    //   if (args != null && args.isNotEmpty) {
+    //     final data = args[0] as List<dynamic>;
+    //     setState(() {
+    //       _silos = data.map((json) => Silo.fromJson(json)).toList();
+    //     });
+    //   }
+    // });
 
+    // Lắng nghe sự kiện UpdateIndicators
+    // hubConnection.on("UpdateIndicators", (args) {
+    //   if (args != null && args.isNotEmpty) {
+    //     final data = args[0] as List<dynamic>;
+    //     setState(() {
+    //       _indicators = data.map((json) => Indicator.fromJson(json)).toList();
+    //     });
+    //   }
+    // });
+
+    // Lắng nghe sự kiện UpdateControllers
+    // hubConnection.on("UpdateControllers", (args) {
+    //   if (args != null && args.isNotEmpty) {
+    //     final data = args[0] as List<dynamic>;
+    //     setState(() {
+    //       _controllers = data.map((json) => Controller.fromJson(json)).toList();
+    //     });
+    //   }
+    // });
+
+    // Lắng nghe giá trị cân realtime
+    hubConnection.on("ReceiveScaleValue", (List<Object?>? args) {
+      if (args == null || args.isEmpty) return;
+
+      debugPrint("SignalR raw args: $args");
+
+      final raw = args[0];
+
+      // Trường hợp backend gửi object JSON
+      if (raw is Map<String, dynamic>) {
         setState(() {
-          _silos = silos;
+          _currentWeight = (raw['value'] as num).toDouble();
+        });
+      }
+
+      // Trường hợp backend gửi chuỗi JSON
+      else if (raw is String) {
+        final data = jsonDecode(raw);
+        setState(() {
+          _currentWeight = (data['value'] as num).toDouble();
+        });
+      }
+
+      // Nếu backend gửi thẳng số
+      else if (raw is num) {
+        setState(() {
+          _currentWeight = raw.toDouble();
         });
       }
     });
 
-    await connection.start();
+    // hubConnection.on("ReceiveScaleValue", (args) {
+    //   if (args == null || args.isEmpty) return;
 
-    if (connection.state == signalr.HubConnectionState.connected) {
-      print('SignalR connected');
-    } else {
-      print('SignalR not connected: ${connection.state}');
+    //   debugPrint("SignalR raw args: $args");
+
+    //   final raw = args[0];
+    //   if (raw is Map) {
+    //     setState(() {
+    //       _currentWeight = (raw['value'] as num).toDouble();
+    //     });
+    //   } else if (raw is String) {
+    //     final data = jsonDecode(raw);
+    //     setState(() {
+    //       _currentWeight = (data['value'] as num).toDouble();
+    //     });
+    //   }
+    // });
+
+    // Bắt đầu kết nối
+    await hubConnection.start();
+    debugPrint("Hub started");
+  }
+
+  Future<void> _loadScales() async {
+    try {
+      final data = await ScaleService.getListScales();
+      setState(() {
+        _silos = data.map((e) => Silo.fromJson(e)).toList();
+      });
+    } catch (e) {
+      print("Error: $e");
+    }
+  }
+
+  Future<void> _loadSilos() async {
+    try {
+      final silos = await ApiService.fetchSilos();
+      setState(() {
+        _silos = silos;
+      });
+    } catch (e) {
+      print("Error loading silos: $e");
+    }
+  }
+
+  Future<void> _loadIndicators() async {
+    try {
+      final indicators = await ApiService.fetchIndicators();
+      setState(() {
+        _indicators = indicators;
+      });
+    } catch (e) {
+      print("Error loading indicators: $e");
+    }
+  }
+
+  Future<void> _loadControllers() async {
+    try {
+      final controllers = await ApiService.fetchControllers();
+      setState(() {
+        _controllers = controllers;
+      });
+    } catch (e) {
+      print("Error loading controllers: $e");
     }
   }
 
@@ -702,26 +821,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      body: _silos.isEmpty
-          ? FutureBuilder<List<Silo>>(
-              future: ApiService.fetchSilos(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return const Center(child: Text('No silos found'));
-                }
-
-                // Khi có dữ liệu ban đầu
-                _silos = snapshot.data!;
-                return _buildDashboard(sidebarWidth);
-              },
-            )
-          : _buildDashboard(sidebarWidth), // realtime cập nhật từ SignalR
+      body: _controllers.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : _buildDashboard(sidebarWidth),
     );
   }
 
@@ -733,11 +835,11 @@ class _DashboardPageState extends State<DashboardPage> {
           height: 76,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.9),
+            color: Colors.white.withValues(alpha:0.9),
             border: Border.all(color: Colors.blue.shade100),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha:0.04),
                 blurRadius: 14,
                 offset: const Offset(0, 8),
               ),
@@ -755,6 +857,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: const Icon(Icons.cloud, color: Colors.white, size: 22),
               ),
               const SizedBox(width: 12),
+
               const Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -772,11 +875,36 @@ class _DashboardPageState extends State<DashboardPage> {
                   ],
                 ),
               ),
-              const Row(
+
+              Row(
                 children: [
-                  Icon(Icons.notifications, color: Colors.black54),
-                  SizedBox(width: 16),
-                  Icon(Icons.account_circle, color: Colors.black54),
+                  const Icon(Icons.notifications, color: Colors.black54,  size: 32),
+                  const SizedBox(width: 22),
+
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.blue.shade700,
+                    ),
+                    child: const Icon(Icons.person, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Text(
+                        'Admin',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      Text(
+                        'Quản trị hệ thống',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ],
@@ -820,51 +948,66 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                         ),
 
-                        // ===== Modules + Plan =====
+                        // ===== Modules + Plan (lấy data từ Silos mới + map controller/indicator tạm bằng index) =====
                         Expanded(
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Modules
                               Expanded(
-                                child: SingleChildScrollView(
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final maxWidth = constraints.maxWidth.isFinite
-                                          ? constraints.maxWidth
-                                          : 1200.0;
-                                      final crossAxisCount = maxWidth >= 1200
-                                          ? 4
-                                          : (maxWidth >= 980
-                                              ? 3
-                                              : (maxWidth >= 720 ? 2 : 1));
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final maxWidth = constraints.maxWidth.isFinite
+                                        ? constraints.maxWidth
+                                        : 1200.0;
+                                    final crossAxisCount = maxWidth >= 1200
+                                        ? 4
+                                        : (maxWidth >= 980
+                                            ? 3
+                                            : (maxWidth >= 720 ? 2 : 1));
 
-                                      return Padding(
-                                        padding: const EdgeInsets.only(right: 12),
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 12),
+                                      child: SingleChildScrollView(
+                                        physics: const AlwaysScrollableScrollPhysics(),
                                         child: GridView.count(
-                                          physics: const NeverScrollableScrollPhysics(),
                                           shrinkWrap: true,
+                                          physics: const NeverScrollableScrollPhysics(),
                                           crossAxisCount: crossAxisCount,
                                           crossAxisSpacing: 16,
                                           mainAxisSpacing: 16,
                                           childAspectRatio: 0.98,
-                                          children: _silos.map((silo) {
-                                            return SiloModule(
-                                              name: silo.id,
-                                              weight: silo.weight,
-                                              level: silo.level,
-                                              indicatorId: silo.indicatorId,
-                                              indicatorPort: silo.indicatorPort,
-                                              indicatorMaxLoad: silo.indicatorMaxLoad,
-                                              controllerIp: silo.controllerIp,
-                                              controllerPort: silo.controllerPort,
-                                              controllerSn: silo.controllerSn,
+                                          children: _silos.asMap().entries.map((entry) {
+                                            final idx = entry.key;
+                                            final silo = entry.value;
+
+                                            final indicatorsForSilo = _indicators.isNotEmpty
+                                                ? <Indicator>[_indicators[idx % _indicators.length]]
+                                                : <Indicator>[];
+
+                                            final controllersForSilo = _controllers.isNotEmpty
+                                                ? <Controller>[_controllers[idx % _controllers.length]]
+                                                : <Controller>[];
+
+                                            return Column(
+                                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                                              children: [
+                                                SiloModule(
+                                                  id: silo.id,
+                                                  // weight: silo.weight,
+                                                  currentWeight: _currentWeight,
+                                                  level: silo.level,
+                                                  indicators: indicatorsForSilo,
+                                                  controllers: controllersForSilo,
+                                                  silos: _silos,
+                                                ),
+                                              ],
                                             );
                                           }).toList(),
                                         ),
-                                      );
-                                    },
-                                  ),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
 
@@ -894,10 +1037,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                       _buildDumpPlanCard(),
                                       _buildWarningTableCard(
                                         rows: _getWarningRowsFromSilos(
-                                          silos: _silos.map((s) => {
-                                            'name': s.id,
-                                            'level': s.level,
-                                          }).toList(),
+                                          silos: _silos,
                                           nowTimeLabel: 'Ngay hiện tại',
                                         ),
                                       ),
