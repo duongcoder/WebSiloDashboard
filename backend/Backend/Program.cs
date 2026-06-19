@@ -1,84 +1,3 @@
-// using Microsoft.AspNetCore.Mvc;
-// using Microsoft.AspNetCore.Mvc.NewtonsoftJson;
-// using Microsoft.EntityFrameworkCore;
-// using Microsoft.OpenApi.Models;
-// using Backend.Data;   // nơi chứa SiloDbContext
-// using Backend.Models;
-// using Backend.Hubs;
-
-// namespace Backend
-// {
-//     public class Program
-//     {
-//         public static void Main(string[] args)
-//         {
-//             var builder = WebApplication.CreateBuilder(args);
-
-//             // Đăng ký DbContext với SQL Server
-//             builder.Services.AddDbContext<SiloDbContext>(options =>
-//                 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-//             // Đăng ký Controllers
-//             builder.Services.AddControllers()
-//                 .AddNewtonsoftJson(options =>
-//                 {
-//                     options.SerializerSettings.ReferenceLoopHandling = Newtonsoft.Json.ReferenceLoopHandling.Ignore;
-//                 });
-
-//             // Đăng ký Swagger
-//             builder.Services.AddEndpointsApiExplorer();
-//             builder.Services.AddSwaggerGen(c =>
-//             {
-//                 c.SwaggerDoc("v1", new OpenApiInfo
-//                 {
-//                     Title = "Silo API",
-//                     Version = "v1",
-//                     Description = "API quản lý silo"
-//                 });
-//             });
-
-//             // Đăng ký CORS
-//             builder.Services.AddCors(options =>
-//             {
-//                 options.AddPolicy("AllowAll",
-//                     policy => policy.AllowAnyOrigin()
-//                                     .AllowAnyMethod()
-//                                     .AllowAnyHeader());
-//             });
-
-//             builder.Services.AddSignalR();
-
-//             var app = builder.Build();
-
-//             // Middleware pipeline
-//             // app.UseHttpsRedirection();
-//             app.UseRouting();
-//             app.UseCors("AllowAll");
-//             app.UseAuthorization();
-
-//             // Swagger middleware
-//             app.UseSwagger();
-//             app.UseSwaggerUI(c =>
-//             {
-//                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Silo API V1");
-//                 c.RoutePrefix = string.Empty; // Swagger UI ngay tại http://localhost:5294
-//             });
-
-//             // app.UseEndpoints(endpoints =>
-//             // {
-//             //     endpoints.MapControllers();
-//             //     endpoints.MapHub<SiloHub>("/siloHub"); // 👈 endpoint cho SignalR
-//             // });
-
-//             // Map controllers và SignalR Hub
-//             app.MapControllers();
-//             app.MapHub<SiloHub>("/siloHub");
-
-//             app.Run();
-//         }
-//     }
-// }
-
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.NewtonsoftJson;
 using Microsoft.EntityFrameworkCore;
@@ -113,21 +32,32 @@ namespace Backend
                     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Silo API", Version = "v1", Description = "API quản lý silo" });
                 });
 
-            // 4. Đăng ký CORS (Đã sửa lỗi để tương thích với SignalR)
+            // 4. Đăng ký CORS thông minh bảo mật cao
+            var allowedOriginsConfig = builder.Configuration.GetValue<string>("AllowedOrigins") ?? string.Empty;
+            var allowedOrigins = allowedOriginsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAll", policy => 
                 {
-                    policy.WithOrigins(
-                                "http://localhost",
-                                "http://192.168.1.22",
-                                "http://127.0.0.1",
-                                "http://localhost:80", // Thêm các domain/IP frontend của khách hàng tại đây
-                                "http://192.168.1.22:80" // Thêm các domain/IP frontend của khách hàng tại đây
-                           )
-                           .AllowAnyMethod()
-                           .AllowAnyHeader()
-                           .AllowCredentials(); // Khóa bảo mật bắt buộc của SignalR
+                    policy.AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials(); // Bắt buộc cho SignalR
+
+                    if (builder.Environment.IsDevelopment())
+                    {
+                        // Môi trường DEV: Cho phép TẤT CẢ các Origin/Cổng ngẫu nhiên từ Flutter Web
+                        // Hàm này biến đổi Origin động để vượt qua ràng buộc khắt khe của AllowCredentials()
+                        policy.SetIsOriginAllowed(origin => true);
+                    }
+                    else
+                    {
+                        // Môi trường KHÁCH HÀNG (Production): Ép buộc bảo mật đúng danh sách cấu hình
+                        if (allowedOrigins.Length > 0)
+                        {
+                            policy.WithOrigins(allowedOrigins);
+                        }
+                    }
                 });
             });
 
@@ -137,21 +67,19 @@ namespace Backend
             var app = builder.Build();
 
             // --- Middleware Pipeline ---
-            
-            // Xử lý lỗi cục bộ hoặc môi trường Production nếu cần
-            if (!app.Environment.IsDevelopment())
+            if (app.Environment.IsDevelopment())
             {
-                app.UseDeveloperExceptionPage(); // Hoặc app.UseExceptionHandler() tùy nhu cầu debug của bạn
+                app.UseDeveloperExceptionPage();
             }
 
             app.UseRouting();
             
-            // CORS phải đặt ĐÚNG vị trí này
+            // CORS đặt cố định tại đây
             app.UseCors("AllowAll");
             
             app.UseAuthorization();
 
-            // Cấu hình Swagger UI (Sẽ hiển thị ngay khi vào http://localhost:5294)
+            // Cấu hình Swagger UI trang gốc
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
@@ -159,7 +87,6 @@ namespace Backend
                 c.RoutePrefix = string.Empty; 
             });
 
-            // Map Routes & Endpoints công nghệ mới (.NET 6+)
             app.MapControllers();
             app.MapHub<SiloHub>("/siloHub");
 
