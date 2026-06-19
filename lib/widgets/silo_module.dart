@@ -55,8 +55,6 @@ class _SiloModuleState extends State<SiloModule> {
   Future<void> _loadScaleValue() async {
     try {
       final response = await http.get(
-        // Uri.parse("http://127.0.0.1:5294/api/Scales/GetScaleValue?id=1"),
-        // Uri.parse("http://192.168.1.74:5294/api/Scales/GetScaleValue?id=1"),
         Uri.parse("${AppConfig.baseUrl}/Scales/GetScaleValue?id=1"),
       );
       if (response.statusCode == 200) {
@@ -386,13 +384,6 @@ class _SiloModuleState extends State<SiloModule> {
                                   style: const TextStyle(fontSize: 16, color: Colors.black87),
                                   textAlign: TextAlign.center,
                                 ),
-                                // Text(
-                                //   widget.currentWeight != null
-                                //       ? '${widget.currentWeight!.toStringAsFixed(1)} kg'
-                                //       : 'Đang tải...',
-                                //   style: const TextStyle(fontSize: 16, color: Colors.black87),
-                                //   textAlign: TextAlign.center,
-                                // ),
                                 const SizedBox(height: 16),
                                 Column(
                                   children: [
