@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using RestSharp;
 using System.Text.Json;
 using Backend.Hubs;
@@ -12,17 +13,21 @@ namespace Backend.Controllers
     {
         private readonly ILogger<ScalesController> _logger;
         private readonly IHubContext<SiloHub> _hubContext;
+        private readonly string _dbUrl;
 
-        public ScalesController(ILogger<ScalesController> logger, IHubContext<SiloHub> hubContext)
+        public ScalesController(ILogger<ScalesController> logger, IHubContext<SiloHub> hubContext, IConfiguration configuration)
         {
             _logger = logger;
             _hubContext = hubContext;
+            
+            // Tự động lấy giá trị từ key "DbPostmanUrl", nếu trống sẽ lấy IP cũ làm mặc định
+            _dbUrl = configuration.GetValue<string>("DbPostmanUrl") ?? "http://14.232.245.56:8089";
         }
 
         // Hàm login để lấy access_token
         private async Task<string?> GetToken()
         {
-            var loginClient = new RestClient("http://14.232.245.56:8089");
+            var loginClient = new RestClient(_dbUrl);
             var loginRequest = new RestRequest("/api/Login", Method.Post);
             loginRequest.AddHeader("Content-Type", "application/json");
             loginRequest.AddStringBody(JsonSerializer.Serialize(new
@@ -50,7 +55,7 @@ namespace Backend.Controllers
             if (string.IsNullOrEmpty(token))
                 return BadRequest("access_token not found");
 
-            var scaleClient = new RestClient("http://14.232.245.56:8089");
+            var scaleClient = new RestClient(_dbUrl);
             var scaleRequest = new RestRequest("/api/Scales/GetListScales", Method.Get);
             scaleRequest.AddHeader("Authorization", $"Bearer {token}");
 
@@ -72,7 +77,7 @@ namespace Backend.Controllers
             if (string.IsNullOrEmpty(token))
                 return BadRequest("access_token not found");
 
-            var scaleClient = new RestClient("http://14.232.245.56:8089");
+            var scaleClient = new RestClient(_dbUrl);
             var scaleRequest = new RestRequest($"/api/Scales/GetScaleValue?Id={id}", Method.Post);
             scaleRequest.AddHeader("Authorization", $"Bearer {token}");
 

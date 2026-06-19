@@ -51,7 +51,7 @@ namespace Backend
             var app = builder.Build();
 
             // Middleware pipeline
-            app.UseHttpsRedirection();
+            // app.UseHttpsRedirection();
             app.UseRouting();
             app.UseCors("AllowAll");
             app.UseAuthorization();

@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:signalr_core/signalr_core.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:responsive_framework/responsive_framework.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'config/app_config.dart';
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
+import 'models/col_data.dart';
 import 'services/sql_service.dart';
 import 'services/scale_service.dart';
 import 'widgets/silo_module.dart';
 import 'widgets/indicator_module.dart';
 import 'widgets/controller_module.dart';
+import '../widgets/col_data_chart.dart';
 
 
 void main() {
@@ -25,6 +30,15 @@ class SiloDashboardApp extends StatelessWidget {
     return MaterialApp(
       title: 'Silo Dashboard',
       theme: ThemeData(primarySwatch: Colors.blue),
+      builder: (context, child) => ResponsiveBreakpoints.builder(
+        child: child!,
+        breakpoints: [
+          const Breakpoint(start: 0, end: 450, name: MOBILE),
+          const Breakpoint(start: 451, end: 800, name: TABLET),
+          const Breakpoint(start: 801, end: 1920, name: DESKTOP),
+          const Breakpoint(start: 1921, end: double.infinity, name: '4K'),
+        ],
+      ),
       home: const DashboardPage(),
     );
   }
@@ -46,6 +60,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Silo> _silos = [];
   List<Controller> _controllers = [];
   List<Indicator> _indicators = [];
+  List<ColData> _colData = [];
 
   // Kế hoạch bơm realtime
   List<Map<String, String>> _pumpPlanRows = [];
@@ -94,10 +109,11 @@ class _DashboardPageState extends State<DashboardPage> {
     _loadSilos();
     _loadIndicators();
     _loadControllers();
+    _loadColData();
     _loadScales();
 
-    // Timer gọi API kế hoạch bơm mỗi 5 giây
-    _pumpTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    // Timer gọi API kế hoạch bơm mỗi 1 giây
+    _pumpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _fetchPumpPlan();
     });
   }
@@ -105,8 +121,11 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _fetchPumpPlan() async {
     try {
       final response = await http.get(
-        Uri.parse("http://14.232.245.56:8089/api/AccessControl/PostScheduler"),
+        // Uri.parse("http://192.168.1.74:5294/api/Schedulers/GetSchedulers"),
+        Uri.parse("${AppConfig.baseUrl}/Schedulers/GetSchedulers"),
       );
+      debugPrint("Response status: ${response.statusCode}");
+      debugPrint("Response body: ${response.body}");
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List<dynamic> schedulers = data['schedulers'];
@@ -143,7 +162,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _initSignalR() async {
     hubConnection = HubConnectionBuilder()
-        .withUrl("http://localhost:5294/siloHub")
+        // .withUrl("http://localhost:5294/siloHub")
+        .withUrl("http://${AppConfig.serverIp}:${AppConfig.apiPort}/siloHub")
         .build();
 
     // Lắng nghe sự kiện UpdateSilos
@@ -202,24 +222,6 @@ class _DashboardPageState extends State<DashboardPage> {
       }
     });
 
-    // hubConnection.on("ReceiveScaleValue", (args) {
-    //   if (args == null || args.isEmpty) return;
-
-    //   debugPrint("SignalR raw args: $args");
-
-    //   final raw = args[0];
-    //   if (raw is Map) {
-    //     setState(() {
-    //       _currentWeight = (raw['value'] as num).toDouble();
-    //     });
-    //   } else if (raw is String) {
-    //     final data = jsonDecode(raw);
-    //     setState(() {
-    //       _currentWeight = (data['value'] as num).toDouble();
-    //     });
-    //   }
-    // });
-
     // Bắt đầu kết nối
     await hubConnection.start();
     debugPrint("Hub started");
@@ -273,6 +275,17 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } catch (e) {
       print("Error loading controllers: $e");
+    }
+  }
+
+  Future<void> _loadColData() async {
+    try {
+      final colDataList = await ApiService.fetchColData();
+      setState(() {
+        _colData = colDataList;
+      });
+    } catch (e) {
+      debugPrint("Error loading ColData: $e");
     }
   }
 
@@ -361,44 +374,6 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
-
-  // final List<Map<String, String>> _pumpPlanRows = [
-  //   {
-  //     'time': '08:00 - 08:30',
-  //     'silo': 'Silo 1',
-  //     'material': 'Thóc',
-  //     'qty': '500',
-  //     'status': 'Sẵn sàng',
-  //   },
-  //   {
-  //     'time': '08:30 - 09:00',
-  //     'silo': 'Silo 2',
-  //     'material': 'Bắp',
-  //     'qty': '320',
-  //     'status': 'Chờ',
-  //   },
-  //   {
-  //     'time': '09:00 - 09:30',
-  //     'silo': 'Silo 3',
-  //     'material': 'Gạo',
-  //     'qty': '450',
-  //     'status': 'Lỗi',
-  //   },
-  //   {
-  //     'time': '09:30 - 10:00',
-  //     'silo': 'Silo 4',
-  //     'material': 'Cám',
-  //     'qty': '250',
-  //     'status': 'Đang bơm',
-  //   },
-  //   {
-  //     'time': '10:00 - 10:30',
-  //     'silo': 'Silo 5',
-  //     'material': 'Đậu',
-  //     'qty': '600',
-  //     'status': 'Đã xong',
-  //   },
-  // ];
 
   final List<Map<String, String>> _dumpPlanRows = [
     {
@@ -726,192 +701,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // Widget _buildPlanCard({
-  //   required String title,
-  //   required List<Map<String, String>> rows,
-  //   required String addSnackBarText,
-  //   required String deleteSnackBarText,
-  // }) {
-  //   return Card(
-  //     elevation: 4,
-  //     margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-  //     child: Column(
-  //       crossAxisAlignment: CrossAxisAlignment.stretch,
-  //       children: [
-  //         Padding(
-  //           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-  //           child: Row(
-  //             children: [
-  //               Text(
-  //                 title,
-  //                 style: const TextStyle(fontWeight: FontWeight.w700),
-  //               ),
-  //               const Spacer(),
-  //               ElevatedButton.icon(
-  //                 onPressed: () async {
-  //                   final result = await showDialog<Map<String, String>>(
-  //                     context: context,
-  //                     builder: (dialogContext) {
-  //                       final timeController = TextEditingController(text: '');
-  //                       final siloController = TextEditingController(text: '');
-  //                       final materialController = TextEditingController(text: '');
-  //                       final qtyController = TextEditingController(text: '');
-  //                       final statusController = TextEditingController(text: 'Chờ');
-
-  //                       return AlertDialog(
-  //                         title: const Text('Thêm kế hoạch'),
-  //                         content: SingleChildScrollView(
-  //                           child: Column(
-  //                             children: [
-  //                               TextField(
-  //                                 controller: timeController,
-  //                                 decoration: const InputDecoration(labelText: 'Thời gian'),
-  //                               ),
-  //                               TextField(
-  //                                 controller: siloController,
-  //                                 decoration: const InputDecoration(labelText: 'Silo'),
-  //                               ),
-  //                               TextField(
-  //                                 controller: materialController,
-  //                                 decoration: const InputDecoration(labelText: 'Nguyên liệu'),
-  //                               ),
-  //                               TextField(
-  //                                 controller: qtyController,
-  //                                 keyboardType: TextInputType.number,
-  //                                 decoration: const InputDecoration(labelText: 'Số lượng'),
-  //                               ),
-  //                               TextField(
-  //                                 controller: statusController,
-  //                                 decoration: const InputDecoration(labelText: 'Trạng thái'),
-  //                               ),
-  //                             ],
-  //                           ),
-  //                         ),
-  //                         actions: [
-  //                           TextButton(
-  //                             onPressed: () => Navigator.of(dialogContext).pop(),
-  //                             child: const Text('Hủy'),
-  //                           ),
-  //                           ElevatedButton(
-  //                             onPressed: () {
-  //                               Navigator.of(dialogContext).pop({
-  //                                 'time': timeController.text.trim(),
-  //                                 'silo': siloController.text.trim(),
-  //                                 'material': materialController.text.trim(),
-  //                                 'qty': qtyController.text.trim(),
-  //                                 'status': statusController.text.trim(),
-  //                               });
-  //                             },
-  //                             child: const Text('Thêm'),
-  //                           ),
-  //                         ],
-  //                       );
-  //                     },
-  //                   );
-
-  //                   if (result == null) return;
-
-  //                   final time = result['time'] ?? '';
-  //                   final silo = result['silo'] ?? '';
-  //                   final material = result['material'] ?? '';
-  //                   final qty = result['qty'] ?? '';
-  //                   final status = result['status'] ?? '';
-
-  //                   if (time.isEmpty || silo.isEmpty || material.isEmpty || qty.isEmpty || status.isEmpty) {
-  //                     ScaffoldMessenger.of(context).showSnackBar(
-  //                       const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
-  //                     );
-  //                     return;
-  //                   }
-
-  //                   setState(() {
-  //                     rows.add({
-  //                       'time': time,
-  //                       'silo': silo,
-  //                       'material': material,
-  //                       'qty': qty,
-  //                       'status': status,
-  //                     });
-  //                   });
-
-  //                   ScaffoldMessenger.of(context).showSnackBar(
-  //                     SnackBar(content: Text(addSnackBarText)),
-  //                   );
-  //                 },
-  //                 icon: const Icon(Icons.add),
-  //                 label: const Text('Thêm kế hoạch'),
-  //               ),
-  //             ],
-  //           ),
-  //         ),
-
-  //         SingleChildScrollView(
-  //           scrollDirection: Axis.horizontal,
-  //           child: Padding(
-  //             padding: const EdgeInsets.all(12.0),
-  //             child: DataTable(
-  //               headingRowColor: WidgetStateProperty.resolveWith(
-  //                 (states) => Colors.blue.shade50,
-  //               ),
-  //               dataRowMinHeight: 44,
-  //               columnSpacing: 24,
-  //               columns: const [
-  //                 DataColumn(label: Text('Thời gian')),
-  //                 DataColumn(label: Text('Silo')),
-  //                 DataColumn(label: Text('Nguyên liệu')),
-  //                 DataColumn(label: Text('Số lượng'), numeric: true),
-  //                 DataColumn(label: Text('Trạng thái')),
-  //                 DataColumn(label: Text('Xóa')),
-  //               ],
-  //               rows: List<DataRow>.generate(rows.length, (index) {
-  //                 final row = rows[index];
-  //                 final status = row['status'] ?? '';
-
-  //                 return DataRow(
-  //                   cells: [
-  //                     DataCell(Text(row['time'] ?? '')),
-  //                     DataCell(Text(row['silo'] ?? '')),
-  //                     DataCell(Text(row['material'] ?? '')),
-  //                     DataCell(Text(row['qty'] ?? '')),
-  //                     DataCell(
-  //                       Container(
-  //                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-  //                         decoration: BoxDecoration(
-  //                           color: _statusColor(status),
-  //                           borderRadius: BorderRadius.circular(8),
-  //                         ),
-  //                         child: Text(
-  //                           status,
-  //                           style: const TextStyle(fontSize: 12),
-  //                         ),
-  //                       ),
-  //                     ),
-  //                     DataCell(
-  //                       IconButton(
-  //                         tooltip: 'Xóa kế hoạch',
-  //                         icon: const Icon(Icons.delete_forever, color: Colors.red),
-  //                         onPressed: () {
-  //                           setState(() {
-  //                             rows.removeAt(index);
-  //                           });
-
-  //                           ScaffoldMessenger.of(context).showSnackBar(
-  //                             SnackBar(content: Text(deleteSnackBarText)),
-  //                           );
-  //                         },
-  //                       ),
-  //                     ),
-  //                   ],
-  //                 );
-  //               }),
-  //             ),
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
   Widget _buildSidebar(double sidebarWidth) {
     return Container(
       width: sidebarWidth,
@@ -1053,6 +842,95 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildColDataChart() {
+  // Hardcode dữ liệu mẫu
+    final List<Map<String, dynamic>> sampleData = [
+      {"date": "06-10", "weight": 1200.0},
+      {"date": "06-11", "weight": 1350.0},
+      {"date": "06-12", "weight": 980.0},
+      {"date": "06-13", "weight": 1500.0},
+      {"date": "06-14", "weight": 1100.0},
+      {"date": "06-15", "weight": 1600.0},
+      {"date": "06-16", "weight": 1400.0},
+    ];
+
+    return SizedBox(
+      height: 300,
+      child: Stack(
+        children: [
+          // Vẽ chart
+          BarChart(
+            BarChartData(
+              alignment: BarChartAlignment.spaceAround,
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(showTitles: true),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (double value, TitleMeta meta) {
+                      int index = value.toInt();
+                      if (index < 0 || index >= sampleData.length) {
+                        return Container();
+                      }
+                      final date = sampleData[index]["date"];
+                      return Text(date, style: const TextStyle(fontSize: 10));
+                    },
+                  ),
+                ),
+              ),
+              barGroups: sampleData.asMap().entries.map((entry) {
+                int index = entry.key;
+                double weight = entry.value["weight"];
+                return BarChartGroupData(
+                  x: index,
+                  barRods: [
+                    BarChartRodData(
+                      toY: weight,
+                      color: Colors.blue,
+                      width: 36, // cột to hơn
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ],
+                );
+              }).toList(),
+              barTouchData: BarTouchData(enabled: false), // tắt tooltip
+            ),
+          ),
+          // Overlay số kg nằm giữa cột
+          Positioned.fill(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: sampleData.map((e) {
+                final double weight = e['weight'];
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Container(), // khoảng trống phía trên
+                    ),
+                    Text(
+                      "${weight.toInt()} kg",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11, // chữ nhỏ gọn
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     const sidebarWidth = 280.0;
@@ -1191,63 +1069,145 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Modules
+                              // Modules + Chart cùng cột
                               Expanded(
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final maxWidth = constraints.maxWidth.isFinite
-                                        ? constraints.maxWidth
-                                        : 1200.0;
-                                    final crossAxisCount = maxWidth >= 1200
-                                        ? 4
-                                        : (maxWidth >= 980
-                                            ? 3
-                                            : (maxWidth >= 720 ? 2 : 1));
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final maxWidth = constraints.maxWidth.isFinite
+                                              ? constraints.maxWidth
+                                              : 1200.0;
+                                          final crossAxisCount = maxWidth >= 1200
+                                              ? 4
+                                              : (maxWidth >= 980
+                                                  ? 3
+                                                  : (maxWidth >= 720 ? 2 : 1));
 
-                                    return Padding(
-                                      padding: const EdgeInsets.only(right: 12),
-                                      child: SingleChildScrollView(
-                                        physics: const AlwaysScrollableScrollPhysics(),
-                                        child: GridView.count(
-                                          shrinkWrap: true,
-                                          physics: const NeverScrollableScrollPhysics(),
-                                          crossAxisCount: crossAxisCount,
-                                          crossAxisSpacing: 16,
-                                          mainAxisSpacing: 16,
-                                          childAspectRatio: 0.98,
-                                          children: _silos.asMap().entries.map((entry) {
-                                            final idx = entry.key;
-                                            final silo = entry.value;
-
-                                            final indicatorsForSilo = _indicators.isNotEmpty
-                                                ? <Indicator>[_indicators[idx % _indicators.length]]
-                                                : <Indicator>[];
-
-                                            final controllersForSilo = _controllers.isNotEmpty
-                                                ? <Controller>[_controllers[idx % _controllers.length]]
-                                                : <Controller>[];
-
-                                            return Column(
+                                          return SingleChildScrollView(
+                                            physics: const AlwaysScrollableScrollPhysics(),
+                                            child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.stretch,
                                               children: [
-                                                SiloModule(
-                                                  id: silo.id,
-                                                  // weight: silo.weight,
-                                                  currentWeight: _currentWeight,
-                                                  level: silo.level,
-                                                  indicators: indicatorsForSilo,
-                                                  controllers: controllersForSilo,
-                                                  silos: _silos,
+                                                // Modules Grid
+                                                GridView.count(
+                                                  shrinkWrap: true,
+                                                  physics: const NeverScrollableScrollPhysics(),
+                                                  crossAxisCount: crossAxisCount,
+                                                  crossAxisSpacing: 16,
+                                                  mainAxisSpacing: 16,
+                                                  childAspectRatio: 0.98,
+                                                  children: _silos.asMap().entries.map((entry) {
+                                                    final idx = entry.key;
+                                                    final silo = entry.value;
+
+                                                    final indicatorsForSilo = _indicators.isNotEmpty
+                                                        ? <Indicator>[_indicators[idx % _indicators.length]]
+                                                        : <Indicator>[];
+
+                                                    final controllersForSilo = _controllers.isNotEmpty
+                                                        ? <Controller>[_controllers[idx % _controllers.length]]
+                                                        : <Controller>[];
+
+                                                    return SiloModule(
+                                                      id: silo.id,
+                                                      currentWeight: _currentWeight,
+                                                      level: silo.level,
+                                                      indicators: indicatorsForSilo,
+                                                      controllers: controllersForSilo,
+                                                      silos: _silos,
+                                                    );
+                                                  }).toList(),
                                                 ),
+
+                                                // Biểu đồ nằm dưới module
+                                                const SizedBox(height: 20),
+                                                const Text(
+                                                  "Biểu đồ khối lượng Silo1",
+                                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                                ),
+                                                _buildColDataChart(),
+                                                // const Text(
+                                                //   "Biểu đồ khối lượng Silo1",
+                                                //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                                // ),
+                                                // SizedBox(height: 300, child: ColDataChart(data: _colData)),
                                               ],
-                                            );
-                                          }).toList(),
-                                        ),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
+                                    ),
+                                  ],
                                 ),
                               ),
+
+                              // Expanded(
+                              //   child: LayoutBuilder(
+                              //     builder: (context, constraints) {
+                              //       final maxWidth = constraints.maxWidth.isFinite
+                              //           ? constraints.maxWidth
+                              //           : 1200.0;
+                              //       final crossAxisCount = maxWidth >= 1200
+                              //           ? 4
+                              //           : (maxWidth >= 980
+                              //               ? 3
+                              //               : (maxWidth >= 720 ? 2 : 1));
+
+                              //       return Column(
+                              //         crossAxisAlignment: CrossAxisAlignment.stretch,
+                              //         children: [
+                              //           // Modules Grid
+                              //           Padding(
+                              //             padding: const EdgeInsets.only(right: 12),
+                              //             child: SingleChildScrollView(
+                              //               physics: const AlwaysScrollableScrollPhysics(),
+                              //               child: GridView.count(
+                              //                 shrinkWrap: true,
+                              //                 physics: const NeverScrollableScrollPhysics(),
+                              //                 crossAxisCount: crossAxisCount,
+                              //                 crossAxisSpacing: 16,
+                              //                 mainAxisSpacing: 16,
+                              //                 childAspectRatio: 0.98,
+                              //                 children: _silos.asMap().entries.map((entry) {
+                              //                   final idx = entry.key;
+                              //                   final silo = entry.value;
+
+                              //                   final indicatorsForSilo = _indicators.isNotEmpty
+                              //                       ? <Indicator>[_indicators[idx % _indicators.length]]
+                              //                       : <Indicator>[];
+
+                              //                   final controllersForSilo = _controllers.isNotEmpty
+                              //                       ? <Controller>[_controllers[idx % _controllers.length]]
+                              //                       : <Controller>[];
+
+                              //                   return SiloModule(
+                              //                     id: silo.id,
+                              //                     currentWeight: _currentWeight,
+                              //                     level: silo.level,
+                              //                     indicators: indicatorsForSilo,
+                              //                     controllers: controllersForSilo,
+                              //                     silos: _silos,
+                              //                   );
+                              //                 }).toList(),
+                              //               ),
+                              //             ),
+                              //           ),
+
+                              //           // Biểu đồ nằm dưới module
+                              //           const SizedBox(height: 20),
+                              //           const Text(
+                              //             "Biểu đồ khối lượng Silo1",
+                              //             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              //           ),
+                              //           SizedBox(height: 300, child: ColDataChart()),
+                              //         ],
+                              //       );     
+                              //     },
+                              //   ),
+                              // ),
 
                               // Plan
                               ConstrainedBox(

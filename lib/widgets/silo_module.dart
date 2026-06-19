@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import '../config/app_config.dart';
 import '../models/indicator.dart';
 import '../models/controller.dart';
 import '../models/silo.dart';
@@ -46,7 +47,7 @@ class _SiloModuleState extends State<SiloModule> {
     super.initState();
     _pumpWeightController = TextEditingController();
     _pumpTimeController = TextEditingController();
-    Timer.periodic(const Duration(seconds: 0), (timer) {
+    Timer.periodic(const Duration(seconds: 1), (timer) {
       _loadScaleValue();
     });
   }
@@ -54,7 +55,9 @@ class _SiloModuleState extends State<SiloModule> {
   Future<void> _loadScaleValue() async {
     try {
       final response = await http.get(
-        Uri.parse("http://127.0.0.1:5294/api/Scales/GetScaleValue?id=1"),
+        // Uri.parse("http://127.0.0.1:5294/api/Scales/GetScaleValue?id=1"),
+        // Uri.parse("http://192.168.1.74:5294/api/Scales/GetScaleValue?id=1"),
+        Uri.parse("${AppConfig.baseUrl}/Scales/GetScaleValue?id=1"),
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
