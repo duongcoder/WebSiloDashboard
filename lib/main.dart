@@ -592,11 +592,11 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildModulesAndChartSection(double maxWidth) {
     int crossAxisCount;
-    if (maxWidth >= 1400) {
+    if (maxWidth >= 1600) {
       crossAxisCount = 4;
-    } else if (maxWidth >= 1100) {
+    } else if (maxWidth >= 1300) {
       crossAxisCount = 3;
-    } else if (maxWidth >= 700) {
+    } else if (maxWidth >= 900) {
       crossAxisCount = 2;
     } else {
       crossAxisCount = 1;
@@ -611,7 +611,8 @@ class _DashboardPageState extends State<DashboardPage> {
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          childAspectRatio: 0.98,
+          // Tăng chiều cao cell để SiloModule lớn hơn
+          childAspectRatio: 1.18,
           children: _silos.asMap().entries.map((entry) {
             final idx = entry.key;
             final silo = entry.value;
