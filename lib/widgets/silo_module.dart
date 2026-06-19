@@ -3,8 +3,7 @@ import '../config/app_config.dart';
 import '../models/indicator.dart';
 import '../models/controller.dart';
 import '../models/silo.dart';
-import 'indicator_module.dart';
-import 'controller_module.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -174,214 +173,223 @@ class _SiloModuleState extends State<SiloModule> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final moduleWidth = constraints.maxWidth.isFinite ? constraints.maxWidth : 420.0;
+        final moduleWidth =
+            constraints.maxWidth.isFinite ? constraints.maxWidth : 420.0;
         final isMobile = moduleWidth < 600;
 
+        // Responsive sizing (scale only)
         final siloWidth = (moduleWidth * 0.28).clamp(70.0, 130.0).toDouble();
-        final indicatorMinWidth = 130.0;
-        final indicatorMaxWidth = (moduleWidth * 0.8).clamp(140.0, 320.0).toDouble();
+        final gaugeHeight = (siloWidth * (isMobile ? 1.8 : 2.0))
+            .clamp(isMobile ? 160.0 : 220.0, isMobile ? 320.0 : 360.0);
 
-        // Keep card structure the same; only change the overall layout from Row->Column on mobile.
-        Widget leftColumn = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            InkWell(
-              onTap: _toggleIndicator,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 8 : 10,
-                  vertical: isMobile ? 8 : 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue.shade100),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Indicator',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    Icon(
-                      _indicatorExpanded ? Icons.expand_less : Icons.expand_more,
-                      color: Colors.blue.shade800,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-              alignment: Alignment.topLeft,
-              child: _indicatorExpanded
-                  ? ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minWidth: isMobile ? 110.0 : indicatorMinWidth,
-                        maxWidth: isMobile ? indicatorMaxWidth * 0.9 : indicatorMaxWidth,
-                        maxHeight: isMobile ? 170 : 200,
-                      ),
-                      child: SingleChildScrollView(
-                        child: IndicatorModule(indicators: widget.indicators),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            SizedBox(height: isMobile ? 10 : 12),
-            SizedBox(
-              width: siloWidth,
-              height: (siloWidth * (isMobile ? 1.8 : 2.0)).clamp(120.0, 360.0),
-              child: CustomPaint(
-                painter: SiloScalePainter(
-                  level: widget.level,
-                  fillColor: getLevelColor(),
-                ),
-              ),
-            ),
-          ],
-        );
+        final sidePadding = isMobile ? 10.0 : 16.0;
+        final headerFontSize = isMobile ? 16.0 : 18.0;
+        final labelFontSize = isMobile ? 14.0 : 16.0;
 
-        Widget rightColumn = Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Align(
-              alignment: isMobile ? Alignment.center : Alignment.centerRight,
-              child: IntrinsicWidth(
-                child: Column(
-                  crossAxisAlignment:
-                      isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.end,
-                  children: [
-                    InkWell(
-                      onTap: _toggleController,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isMobile ? 8 : 10,
-                          vertical: isMobile ? 8 : 10,
+        // Required visible parts: Header(id), gauge, and Số cân + 3 buttons.
+        final content = isMobile
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Gauge
+                  Center(
+                    child: SizedBox(
+                      width: siloWidth,
+                      height: gaugeHeight,
+                      child: CustomPaint(
+                        painter: SiloScalePainter(
+                          level: widget.level,
+                          fillColor: getLevelColor(),
                         ),
-                        decoration: BoxDecoration(
-                          color: Colors.teal.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.teal.shade100),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: isMobile ? 10 : 12),
+
+                  // Weight
+                  Text(
+                    'Số cân:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: labelFontSize,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: isMobile ? 6 : 8),
+                  Text(
+                    _currentWeight != null
+                        ? '${_currentWeight!.toStringAsFixed(1)} kg'
+                        : 'Đang tải...',
+                    style: TextStyle(
+                      fontSize: labelFontSize,
+                      color: Colors.black87,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: isMobile ? 12 : 16),
+
+                  // Buttons (hidden Start/Stop/...), but requirement says keep 3 buttons.
+                  Column(
+                    children: [
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          minimumSize: Size(
+                            (moduleWidth * 0.30).clamp(40.0, 90.0),
+                            isMobile ? 34 : 36,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 6),
+                          textStyle: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        onPressed: () {},
+                        child: const Text('Start'),
+                      ),
+                      SizedBox(height: isMobile ? 8 : 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade700,
+                          foregroundColor: Colors.white,
+                          minimumSize: Size(
+                            (moduleWidth * 0.30).clamp(40.0, 90.0),
+                            isMobile ? 34 : 36,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 6),
+                          textStyle: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        onPressed: () {},
+                        child: const Text('Stop'),
+                      ),
+                      SizedBox(height: isMobile ? 8 : 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange.shade700,
+                          foregroundColor: Colors.white,
+                          minimumSize: Size(
+                            (moduleWidth * 0.30).clamp(40.0, 90.0),
+                            isMobile ? 34 : 36,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 6),
+                          textStyle: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        onPressed: _showPumpDialog,
+                        child: const Text('Bơm'),
+                      ),
+                    ],
+                  ),
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Left gauge
+                  Flexible(
+                    fit: FlexFit.loose,
+                    child: Center(
+                      child: SizedBox(
+                        width: siloWidth,
+                        height: gaugeHeight,
+                        child: CustomPaint(
+                          painter: SiloScalePainter(
+                            level: widget.level,
+                            fillColor: getLevelColor(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  // Right weight + buttons
+                  Flexible(
+                    fit: FlexFit.loose,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Số cân:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: labelFontSize,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: isMobile ? 6 : 8),
+                        Text(
+                          _currentWeight != null
+                              ? '${_currentWeight!.toStringAsFixed(1)} kg'
+                              : 'Đang tải...',
+                          style: TextStyle(
+                            fontSize: labelFontSize,
+                            color: Colors.black87,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: isMobile ? 12 : 16),
+                        Column(
                           children: [
-                            const Text(
-                              'Bộ Điều Khiển',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 14),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green.shade600,
+                                foregroundColor: Colors.white,
+                                minimumSize: Size(
+                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
+                                  isMobile ? 34 : 36,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 6),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                              onPressed: () {},
+                              child: const Text('Start'),
                             ),
-                            Icon(
-                              _controllerExpanded
-                                  ? Icons.expand_less
-                                  : Icons.expand_more,
-                              color: Colors.teal.shade800,
+                            SizedBox(height: isMobile ? 8 : 8),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red.shade700,
+                                foregroundColor: Colors.white,
+                                minimumSize: Size(
+                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
+                                  isMobile ? 34 : 36,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 6),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                              onPressed: () {},
+                              child: const Text('Stop'),
+                            ),
+                            SizedBox(height: isMobile ? 8 : 8),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange.shade700,
+                                foregroundColor: Colors.white,
+                                minimumSize: Size(
+                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
+                                  isMobile ? 34 : 36,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 6),
+                                textStyle: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                              onPressed: _showPumpDialog,
+                              child: const Text('Bơm'),
                             ),
                           ],
-                        ),
-                      ),
+                        )
+                      ],
                     ),
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                      alignment:
-                          isMobile ? Alignment.topCenter : Alignment.topRight,
-                      child: _controllerExpanded
-                          ? ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minWidth: isMobile ? 110.0 : indicatorMinWidth,
-                                maxWidth: isMobile ? indicatorMaxWidth * 0.9 : indicatorMaxWidth,
-                                maxHeight: isMobile ? 130 : 150,
-                              ),
-                              child: SingleChildScrollView(
-                                child: ControllerModule(
-                                  controllers: widget.controllers,
-                                ),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(height: isMobile ? 12 : 16),
-            Text(
-              'Số cân:',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: isMobile ? 14 : 16,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: isMobile ? 6 : 8),
-            Text(
-              _currentWeight != null
-                  ? '${_currentWeight!.toStringAsFixed(1)} kg'
-                  : 'Đang tải...',
-              style: TextStyle(
-                fontSize: isMobile ? 14 : 16,
-                color: Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            SizedBox(height: isMobile ? 12 : 16),
-            Column(
-              children: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    foregroundColor: Colors.white,
-                    minimumSize: Size(
-                      (moduleWidth * 0.30).clamp(40.0, 90.0),
-                      isMobile ? 34 : 36,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                   ),
-                  onPressed: () {},
-                  child: const Text('Start'),
-                ),
-                SizedBox(height: isMobile ? 8 : 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade700,
-                    foregroundColor: Colors.white,
-                    minimumSize: Size(
-                      (moduleWidth * 0.30).clamp(40.0, 90.0),
-                      isMobile ? 34 : 36,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                  onPressed: () {},
-                  child: const Text('Stop'),
-                ),
-                SizedBox(height: isMobile ? 8 : 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange.shade700,
-                    foregroundColor: Colors.white,
-                    minimumSize: Size(
-                      (moduleWidth * 0.30).clamp(40.0, 90.0),
-                      isMobile ? 34 : 36,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                  onPressed: _showPumpDialog,
-                  child: const Text('Bơm'),
-                ),
-              ],
-            ),
-          ],
-        );
+                ],
+              );
 
         return SizedBox(
           width: double.infinity,
@@ -394,33 +402,20 @@ class _SiloModuleState extends State<SiloModule> {
               child: Scrollbar(
                 thumbVisibility: true,
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: EdgeInsets.all(sidePadding),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         widget.id,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: headerFontSize,
+                        ),
                         textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 12),
-                      isMobile
-                          ? Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                leftColumn,
-                                const SizedBox(height: 14),
-                                rightColumn,
-                              ],
-                            )
-                          : Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Flexible(fit: FlexFit.loose, child: leftColumn),
-                                const SizedBox(width: 20),
-                                Flexible(fit: FlexFit.loose, child: rightColumn),
-                              ],
-                            ),
+                      SizedBox(height: 12),
+                      content,
                     ],
                   ),
                 ),
