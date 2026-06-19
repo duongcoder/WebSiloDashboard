@@ -74,8 +74,7 @@ class _SiloModuleState extends State<SiloModule> {
     return Colors.red;
   }
 
-  void _toggleIndicator() => setState(() => _indicatorExpanded = !_indicatorExpanded);
-  void _toggleController() => setState(() => _controllerExpanded = !_controllerExpanded);
+
 
   void _showPumpDialog() {
     showDialog<void>(
@@ -228,61 +227,8 @@ class _SiloModuleState extends State<SiloModule> {
                   ),
                   SizedBox(height: isMobile ? 12 : 16),
 
-                  // Buttons (hidden Start/Stop/...), but requirement says keep 3 buttons.
-                  Column(
-                    children: [
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade600,
-                          foregroundColor: Colors.white,
-                          minimumSize: Size(
-                            (moduleWidth * 0.30).clamp(40.0, 90.0),
-                            isMobile ? 34 : 36,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 6),
-                          textStyle: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
-                        ),
-                        onPressed: () {},
-                        child: const Text('Start'),
-                      ),
-                      SizedBox(height: isMobile ? 8 : 8),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red.shade700,
-                          foregroundColor: Colors.white,
-                          minimumSize: Size(
-                            (moduleWidth * 0.30).clamp(40.0, 90.0),
-                            isMobile ? 34 : 36,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 6),
-                          textStyle: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
-                        ),
-                        onPressed: () {},
-                        child: const Text('Stop'),
-                      ),
-                      SizedBox(height: isMobile ? 8 : 8),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange.shade700,
-                          foregroundColor: Colors.white,
-                          minimumSize: Size(
-                            (moduleWidth * 0.30).clamp(40.0, 90.0),
-                            isMobile ? 34 : 36,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 6),
-                          textStyle: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
-                        ),
-                        onPressed: _showPumpDialog,
-                        child: const Text('Bơm'),
-                      ),
-                    ],
-                  ),
+                  // (Ẩn Start/Stop/Bơm theo yêu cầu) 
+                  const SizedBox.shrink(),
                 ],
               )
             : Row(
@@ -331,60 +277,7 @@ class _SiloModuleState extends State<SiloModule> {
                           textAlign: TextAlign.center,
                         ),
                         SizedBox(height: isMobile ? 12 : 16),
-                        Column(
-                          children: [
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green.shade600,
-                                foregroundColor: Colors.white,
-                                minimumSize: Size(
-                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
-                                  isMobile ? 34 : 36,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 6),
-                                textStyle: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              onPressed: () {},
-                              child: const Text('Start'),
-                            ),
-                            SizedBox(height: isMobile ? 8 : 8),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red.shade700,
-                                foregroundColor: Colors.white,
-                                minimumSize: Size(
-                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
-                                  isMobile ? 34 : 36,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 6),
-                                textStyle: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              onPressed: () {},
-                              child: const Text('Stop'),
-                            ),
-                            SizedBox(height: isMobile ? 8 : 8),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange.shade700,
-                                foregroundColor: Colors.white,
-                                minimumSize: Size(
-                                  (moduleWidth * 0.30).clamp(40.0, 90.0),
-                                  isMobile ? 34 : 36,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 6),
-                                textStyle: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              onPressed: _showPumpDialog,
-                              child: const Text('Bơm'),
-                            ),
-                          ],
-                        )
+                        const SizedBox.shrink()
                       ],
                     ),
                   ),
