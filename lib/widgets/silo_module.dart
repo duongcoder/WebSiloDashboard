@@ -1,12 +1,13 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
 import '../config/app_config.dart';
 import '../models/indicator.dart';
 import '../models/controller.dart';
 import '../models/silo.dart';
-
-import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 
 class SiloModule extends StatefulWidget {
   final String id;
@@ -31,141 +32,60 @@ class SiloModule extends StatefulWidget {
 }
 
 class _SiloModuleState extends State<SiloModule> {
-  bool _indicatorExpanded = false;
-  bool _controllerExpanded = false;
-  double? _currentWeight;
+  // Giá trị Max do user nhập (Cân Max)
+  final TextEditingController _maxWeightController =
+      TextEditingController(text: '100');
 
-  late final TextEditingController _pumpWeightController;
-  late final TextEditingController _pumpTimeController;
-  String _pumpMode = 'fast';
+
+    double _currentWeight = 0;
+
+  double _maxWeight = 100;
+
+  late final Timer _timer;
+
+
 
   @override
   void initState() {
     super.initState();
-    _pumpWeightController = TextEditingController();
-    _pumpTimeController = TextEditingController();
+    _currentWeight = widget.currentWeight ?? 0;
 
-    Timer.periodic(const Duration(seconds: 1), (_) {
+
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _loadScaleValue();
     });
+
+    // immediate fetch
+    _loadScaleValue();
   }
 
   Future<void> _loadScaleValue() async {
     try {
       final response = await http.get(
-        Uri.parse("${AppConfig.baseUrl}/Scales/GetScaleValue?id=1"),
+        Uri.parse('${AppConfig.baseUrl}/Scales/GetScaleValue?id=1'),
       );
 
       if (!mounted) return;
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        setState(() {
-          _currentWeight = (data['value'] as num).toDouble();
-        });
+        final value = (data['value'] as num).toDouble();
+        setState(() => _currentWeight = value);
       }
     } catch (e) {
-      debugPrint("Error: $e");
+      debugPrint('Error: $e');
     }
-  }
-
-  Color getLevelColor() {
-    if (widget.level > 0.5) return Colors.green;
-    if (widget.level > 0.2) return Colors.yellow.shade700;
-    return Colors.red;
-  }
-
-
-
-  void _showPumpDialog() {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text(
-                'Cài đặt Bơm',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: _pumpWeightController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Khối lượng (kg)',
-                        hintText: 'Nhập khối lượng',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _pumpTimeController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Thời gian (phút)',
-                        hintText: 'Nhập thời gian',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    RadioListTile<String>(
-                      title: const Text('Bơm nhanh'),
-                      value: 'fast',
-                      groupValue: _pumpMode,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setStateDialog(() => _pumpMode = v);
-                      },
-                    ),
-                    RadioListTile<String>(
-                      title: const Text('Bơm chậm'),
-                      value: 'slow',
-                      groupValue: _pumpMode,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setStateDialog(() => _pumpMode = v);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Hủy'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Bơm: ${_pumpWeightController.text} kg, '
-                          '${_pumpTimeController.text} phút, '
-                          '${_pumpMode == "fast" ? "Bơm nhanh" : "Bơm chậm"}',
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Xác nhận'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 
   @override
   void dispose() {
-    _pumpWeightController.dispose();
-    _pumpTimeController.dispose();
+    _timer.cancel();
     super.dispose();
+  }
+
+  Color _getLevelColor(double level) {
+    if (level > 0.5) return Colors.green;
+    if (level > 0.2) return Colors.yellow.shade700;
+    return Colors.red;
   }
 
   @override
@@ -176,108 +96,104 @@ class _SiloModuleState extends State<SiloModule> {
             constraints.maxWidth.isFinite ? constraints.maxWidth : 420.0;
         final isMobile = moduleWidth < 600;
 
-        // Responsive sizing (scale only)
-        final siloWidth = (moduleWidth * 0.28).clamp(70.0, 130.0).toDouble();
+        // Scale only (avoid overflow)
+        final siloWidth = (moduleWidth * 0.28).clamp(70.0, 130.0);
         final gaugeHeight = (siloWidth * (isMobile ? 1.8 : 2.0))
             .clamp(isMobile ? 160.0 : 220.0, isMobile ? 320.0 : 360.0);
 
         final sidePadding = isMobile ? 10.0 : 16.0;
         final headerFontSize = isMobile ? 16.0 : 18.0;
         final labelFontSize = isMobile ? 14.0 : 16.0;
+        final valueFontSize = (labelFontSize + (isMobile ? 0.0 : 1.0))
+            .clamp(13.0, 18.0);
 
-        // Required visible parts: Header(id), gauge, and Số cân + 3 buttons.
+        final weightValue = _currentWeight > 0
+            ? '${_currentWeight.toStringAsFixed(1)} kg'
+            : 'Đang tải...';
+
+        final maxWeight = (_maxWeight > 0) ? _maxWeight : 1;
+        final currentForLevel = _currentWeight.clamp(0.0, maxWeight);
+        final levelPercent = ((currentForLevel / maxWeight) * 100.0).clamp(0.0, 100.0);
+        final gaugeLevel = (levelPercent / 100.0).clamp(0.0, 1.0);
+
+    final gaugeLevelForPainter = (levelPercent / 100.0).clamp(0.0, 1.0);
+
+    final gauge = SizedBox(
+          width: siloWidth,
+          height: gaugeHeight,
+          child: CustomPaint(
+              painter: SiloScalePainter(
+              level: gaugeLevelForPainter,
+              fillColor: _getLevelColor(levelPercent / 100.0),
+            ),
+          ),
+        );
+
         final content = isMobile
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Gauge
-                  Center(
-                    child: SizedBox(
-                      width: siloWidth,
-                      height: gaugeHeight,
-                      child: CustomPaint(
-                        painter: SiloScalePainter(
-                          level: widget.level,
-                          fillColor: getLevelColor(),
-                        ),
-                      ),
-                    ),
-                  ),
+                  Center(child: gauge),
                   SizedBox(height: isMobile ? 10 : 12),
-
-                  // Weight
                   Text(
-                    'Số cân:',
+                    'Số cân',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: labelFontSize,
                     ),
                     textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: isMobile ? 6 : 8),
                   Text(
-                    _currentWeight != null
-                        ? '${_currentWeight!.toStringAsFixed(1)} kg'
-                        : 'Đang tải...',
+                    weightValue,
                     style: TextStyle(
-                      fontSize: labelFontSize,
+                      fontSize: valueFontSize,
                       color: Colors.black87,
+                      fontWeight: FontWeight.w600,
                     ),
                     textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    maxLines: 1,
                   ),
-                  SizedBox(height: isMobile ? 12 : 16),
-
-                  // (Ẩn Start/Stop/Bơm theo yêu cầu) 
-                  const SizedBox.shrink(),
                 ],
               )
             : Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Left gauge
                   Flexible(
                     fit: FlexFit.loose,
-                    child: Center(
-                      child: SizedBox(
-                        width: siloWidth,
-                        height: gaugeHeight,
-                        child: CustomPaint(
-                          painter: SiloScalePainter(
-                            level: widget.level,
-                            fillColor: getLevelColor(),
-                          ),
-                        ),
-                      ),
-                    ),
+                    child: Center(child: gauge),
                   ),
-                  const SizedBox(width: 20),
-                  // Right weight + buttons
+                  SizedBox(width: moduleWidth * 0.04),
                   Flexible(
                     fit: FlexFit.loose,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Số cân:',
+                          'Số cân',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: labelFontSize,
                           ),
                           textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         SizedBox(height: isMobile ? 6 : 8),
                         Text(
-                          _currentWeight != null
-                              ? '${_currentWeight!.toStringAsFixed(1)} kg'
-                              : 'Đang tải...',
+                          weightValue,
                           style: TextStyle(
-                            fontSize: labelFontSize,
+                            fontSize: valueFontSize,
                             color: Colors.black87,
+                            fontWeight: FontWeight.w600,
                           ),
                           textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          maxLines: 1,
                         ),
-                        SizedBox(height: isMobile ? 12 : 16),
-                        const SizedBox.shrink()
                       ],
                     ),
                   ),
@@ -291,26 +207,56 @@ class _SiloModuleState extends State<SiloModule> {
             margin: const EdgeInsets.all(12),
             clipBehavior: Clip.hardEdge,
             child: SizedBox(
-              height: 400,
-              child: Scrollbar(
-                thumbVisibility: true,
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.all(sidePadding),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.id,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: headerFontSize,
-                        ),
-                        textAlign: TextAlign.center,
+              // Keep stable height; still scrollable in case small screens
+              height: isMobile ? 360 : 400,
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(sidePadding),
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.id,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: headerFontSize,
                       ),
-                      SizedBox(height: 12),
-                      content,
-                    ],
-                  ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    SizedBox(height: isMobile ? 10 : 12),
+                    const SizedBox(height: 8),
+
+                    // Input: Cân Max
+                    Align(
+                      alignment: Alignment.center,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: isMobile ? 260 : 320,
+                        ),
+                        child: TextField(
+                          controller: _maxWeightController,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Cân Max (kg)',
+                            border: OutlineInputBorder(),
+                          ),
+                          inputFormatters: const [],
+                          onChanged: (v) {
+                            final parsed = double.tryParse(v.replaceAll(',', '.'));
+                            if (parsed == null) return;
+                            setState(() {
+                              _maxWeight = parsed;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+
+                    content,
+                  ],
                 ),
               ),
             ),
@@ -352,29 +298,36 @@ class SiloScalePainter extends CustomPainter {
     final Rect topEllipse = Rect.fromLTWH(0, 0, w, ellipseH);
     final double tipY = h;
 
-    Path bodyPath = Path();
-    bodyPath.moveTo(0, bodyTop);
-    bodyPath.lineTo(0, bodyBottom - ellipseH / 2);
-    bodyPath.lineTo(w / 2, tipY);
-    bodyPath.lineTo(w, bodyBottom - ellipseH / 2);
-    bodyPath.lineTo(w, bodyTop);
-    bodyPath.close();
+    final double safeLevel = level.clamp(0.0, 1.0);
+
+    final Path bodyPath = Path()
+      ..moveTo(0, bodyTop)
+      ..lineTo(0, bodyBottom - ellipseH / 2)
+      ..lineTo(w / 2, tipY)
+      ..lineTo(w, bodyBottom - ellipseH / 2)
+      ..lineTo(w, bodyTop)
+      ..close();
 
     canvas.drawPath(bodyPath, bodyPaint);
     canvas.drawPath(bodyPath, stroke);
     canvas.drawOval(topEllipse, stroke);
 
     final double totalFillArea = tipY - bodyTop;
-    final double fillHeight =
-        (totalFillArea * level).clamp(0.0, totalFillArea);
+    final double fillHeight = (totalFillArea * safeLevel).clamp(0.0, totalFillArea);
     final double fillTop = tipY - fillHeight;
 
     final Paint fillPaint = Paint()..color = fillColor;
-    final Rect fillEllipse = Rect.fromLTWH(0, fillTop - ellipseH / 2, w, ellipseH);
 
-    Path fillPath = Path();
-    fillPath.addOval(fillEllipse);
-    fillPath.addRect(Rect.fromLTWH(0, fillTop, w, tipY - fillTop));
+    final Rect fillEllipse = Rect.fromLTWH(
+      0,
+      fillTop - ellipseH / 2,
+      w,
+      ellipseH,
+    );
+
+    final Path fillPath = Path()
+      ..addOval(fillEllipse)
+      ..addRect(Rect.fromLTWH(0, fillTop, w, tipY - fillTop));
 
     canvas.save();
     canvas.clipPath(bodyPath);
@@ -390,8 +343,8 @@ class SiloScalePainter extends CustomPainter {
     canvas.drawOval(topEllipse, topFill);
 
     for (int i = 1; i <= 5; i++) {
-      double t = i / 5.0;
-      double y = tipY - totalFillArea * t;
+      final double t = i / 5.0;
+      final double y = tipY - totalFillArea * t;
       canvas.drawLine(Offset(4, y), Offset(w - 4, y), stroke);
 
       final tp = TextPainter(
@@ -400,29 +353,32 @@ class SiloScalePainter extends CustomPainter {
           style: const TextStyle(color: Colors.black, fontSize: 10),
         ),
         textDirection: TextDirection.ltr,
-      )
-        ..layout();
+      )..layout();
 
-      tp.paint(canvas, Offset(w + 6, y - tp.height / 2));
+      // paint at right side; clip will prevent overflow outside widget bounds
+      tp.paint(canvas, Offset(w - tp.width - 2, y - tp.height / 2));
     }
 
-    final String pct = '${(level * 100).toInt()}%';
+    final String pct = '${(safeLevel * 100).toInt()}%';
     final pctTp = TextPainter(
       text: TextSpan(
         text: pct,
         style: TextStyle(
-          color: (level > 0.25) ? Colors.white : Colors.black,
+          color: (safeLevel > 0.25) ? Colors.white : Colors.black,
           fontWeight: FontWeight.bold,
-          fontSize: 14,
+          fontSize: (w * 0.12).clamp(12.0, 16.0),
         ),
       ),
       textDirection: TextDirection.ltr,
-    )
-      ..layout();
+    )..layout();
 
     double pctY = fillTop + (bodyBottom - fillTop) / 2 - pctTp.height / 2;
     pctY = pctY.clamp(bodyTop, bodyBottom - pctTp.height);
+
+    canvas.save();
+    canvas.clipPath(bodyPath);
     pctTp.paint(canvas, Offset((w - pctTp.width) / 2, pctY));
+    canvas.restore();
   }
 
   @override
