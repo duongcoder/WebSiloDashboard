@@ -1,6 +1,0 @@
-- [ ] Refactor `lib/main.dart` to remove all silo data fetching and SignalR usage
-- [ ] Add loading for `controllers` and `indicators` using `ApiService`
-- [ ] Update dashboard modules grid to be built from `controllers` (and mapped to `indicators`)
-- [ ] Replace dynamic `level/weight` from silos with hardcoded values (to be updated after DB migration)
-- [ ] Update warning table to be derived from controllers with the hardcoded level/weight logic
-- [ ] Ensure `main.dart` compiles (remove any references to silo fields not present in `Silo` model)

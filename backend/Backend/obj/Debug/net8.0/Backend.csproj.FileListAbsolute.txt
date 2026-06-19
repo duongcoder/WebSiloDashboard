@@ -8,6 +8,8 @@ D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Backend.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Backend.pdb
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Azure.Core.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Azure.Identity.dll
+D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.AspNetCore.JsonPatch.dll
+D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.AspNetCore.OpenApi.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.Bcl.AsyncInterfaces.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.Data.SqlClient.dll
@@ -26,6 +28,9 @@ D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.IdentityMod
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.OpenApi.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.SqlServer.Server.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.Win32.SystemEvents.dll
+D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Newtonsoft.Json.dll
+D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Newtonsoft.Json.Bson.dll
+D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\RestSharp.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Swashbuckle.AspNetCore.Swagger.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Swashbuckle.AspNetCore.SwaggerGen.dll
 D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Swashbuckle.AspNetCore.SwaggerUI.dll
@@ -73,8 +78,3 @@ D:\WebSilo\silo_dashboard\backend\Backend\obj\Debug\net8.0\refint\Backend.dll
 D:\WebSilo\silo_dashboard\backend\Backend\obj\Debug\net8.0\Backend.pdb
 D:\WebSilo\silo_dashboard\backend\Backend\obj\Debug\net8.0\Backend.genruntimeconfig.cache
 D:\WebSilo\silo_dashboard\backend\Backend\obj\Debug\net8.0\ref\Backend.dll
-D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.AspNetCore.JsonPatch.dll
-D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Newtonsoft.Json.dll
-D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll
-D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\Newtonsoft.Json.Bson.dll
-D:\WebSilo\silo_dashboard\backend\Backend\bin\Debug\net8.0\RestSharp.dll

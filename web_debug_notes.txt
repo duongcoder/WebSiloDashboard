@@ -1,9 +1,0 @@
-Lý do hiện tại không thấy module silo:
-- `lib/services/sql_service.dart` đang trả về [] (mock) để project build.
-- Vì `dart_mssql` không tương thích Dart 3.12.1 nên chưa thể gọi SQL trực tiếp.
-
-Kế hoạch tiếp theo:
-1) Tạo local gateway trên Windows (localhost) để proxy query SQL và trả JSON đúng schema Silo.
-2) Sửa `SqlService.fetchSilos()` để gọi gateway: GET/POST localhost.
-3) Test lại trên Chrome.
-
