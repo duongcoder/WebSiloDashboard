@@ -1,41 +1,45 @@
 class SiloHistoryModel {
   final int id;
-  final DateTime recordTime;
-  final double weight;
+  final int idScale;
+  final double weightPre;
+  final double weightNow;
+  final DateTime time;
   final int sync;
+  final String des;
   final Map<String, dynamic> raw;
 
   SiloHistoryModel({
     required this.id,
-    required this.recordTime,
-    required this.weight,
+    required this.idScale,
+    required this.weightPre,
+    required this.weightNow,
+    required this.time,
     required this.sync,
+    required this.des,
     required this.raw,
   });
+
+  // Giữ tương thích cho các luồng cũ đang dùng tên field cũ.
+  DateTime get recordTime => time;
+  double get weight => weightNow;
 
   factory SiloHistoryModel.fromJson(
     Map<String, dynamic> json, {
     int defaultId = -1,
   }) {
-    final id = _toInt(
-      json['id'] ?? json['Id'] ?? json['scaleId'] ?? json['id_relay'],
+    final id = _toInt(json['id'] ?? json['Id'], defaultValue: defaultId);
+    final idScale = _toInt(
+      json['id_scale'] ?? json['idScale'] ?? json['IdScale'] ?? json['id_relay'],
       defaultValue: defaultId,
     );
-
-    final recordTime = _parseDateTime(
-      json['recordDate'] ??
-          json['RecordDate'] ??
-          json['record_time'] ??
-          json['recordTime'] ??
-          json['time'] ??
-          json['Time'] ??
-          json['createdAt'] ??
-          json['created_at'] ??
-          json['timestamp'],
+    final weightPre = _toDouble(
+      json['weight_pre'] ?? json['weightPre'] ?? json['WeightPre'],
     );
-
-    final weight = _toDouble(
-      json['weight'] ??
+    final weightNow = _toDouble(
+      json['weight_now'] ??
+          json['weightNow'] ??
+          json['WeightNow'] ??
+          json['weight'] ??
           json['Weight'] ??
           json['value'] ??
           json['Value'] ??
@@ -43,14 +47,28 @@ class SiloHistoryModel {
           json['WeightKg'] ??
           json['grossWeight'],
     );
-
+    final time = _parseDateTime(
+      json['time'] ??
+          json['Time'] ??
+          json['recordDate'] ??
+          json['RecordDate'] ??
+          json['record_time'] ??
+          json['recordTime'] ??
+          json['createdAt'] ??
+          json['created_at'] ??
+          json['timestamp'],
+    );
     final sync = _toInt(json['sync'] ?? json['Sync'], defaultValue: -1);
+    final des = (json['des'] ?? json['Des'] ?? '').toString();
 
     return SiloHistoryModel(
       id: id,
-      recordTime: recordTime,
-      weight: weight,
+      idScale: idScale,
+      weightPre: weightPre,
+      weightNow: weightNow,
+      time: time,
       sync: sync,
+      des: des,
       raw: json,
     );
   }
@@ -58,52 +76,84 @@ class SiloHistoryModel {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'recordTime': recordTime.toIso8601String(),
-      'weight': weight,
+      'id_scale': idScale,
+      'weight_pre': weightPre,
+      'weight_now': weightNow,
+      'time': time.toIso8601String(),
       'sync': sync,
+      'des': des,
     };
+  }
+
+  /// Trả về thời gian hiển thị dạng HH:mm:ss.
+  String get displayTimeHms {
+    final local = time.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    final second = local.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
   }
 
   static List<SiloHistoryModel> parseListFromResponse(
     dynamic decoded, {
     int defaultId = -1,
   }) {
-    final rows = <dynamic>[];
-
-    if (decoded is List) {
-      rows.addAll(decoded);
-    } else if (decoded is Map<String, dynamic>) {
-      final nestedList = _extractList(decoded);
-      if (nestedList != null) {
-        rows.addAll(nestedList);
-      } else {
-        rows.add(decoded);
-      }
-    }
+    final rows = _extractHistoryRows(decoded);
 
     return rows
-        .whereType<Map<String, dynamic>>()
         .map((row) => SiloHistoryModel.fromJson(row, defaultId: defaultId))
         .toList();
   }
 
-  static List<dynamic>? _extractList(Map<String, dynamic> map) {
-    const candidates = [
-      'data',
-      'items',
-      'result',
-      'results',
-      'history',
-      'histories',
-      'records',
-    ];
+  static List<Map<String, dynamic>> _extractHistoryRows(dynamic node) {
+    final rows = <Map<String, dynamic>>[];
 
-    for (final key in candidates) {
-      final value = map[key];
-      if (value is List) return value;
+    void walk(dynamic value) {
+      if (value is List) {
+        for (final item in value) {
+          walk(item);
+        }
+        return;
+      }
+
+      if (value is Map<String, dynamic>) {
+        if (_looksLikeHistoryRow(value)) {
+          rows.add(value);
+        }
+
+        for (final nested in value.values) {
+          walk(nested);
+        }
+      }
     }
 
-    return null;
+    walk(node);
+    return rows;
+  }
+
+  static bool _looksLikeHistoryRow(Map<String, dynamic> row) {
+    final hasTime = row.containsKey('time') ||
+        row.containsKey('Time') ||
+        row.containsKey('recordTime') ||
+        row.containsKey('record_time') ||
+        row.containsKey('recordDate') ||
+        row.containsKey('RecordDate');
+
+    final hasWeight = row.containsKey('weight_now') ||
+        row.containsKey('weightNow') ||
+        row.containsKey('WeightNow') ||
+        row.containsKey('weight') ||
+        row.containsKey('Weight') ||
+        row.containsKey('value') ||
+        row.containsKey('Value');
+
+    final hasIdentity = row.containsKey('id') ||
+        row.containsKey('Id') ||
+        row.containsKey('id_scale') ||
+        row.containsKey('idScale') ||
+        row.containsKey('IdScale');
+
+    return hasTime && hasWeight && hasIdentity;
   }
 
   static int _toInt(dynamic value, {int defaultValue = 0}) {

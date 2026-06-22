@@ -67,7 +67,7 @@ class _DashboardPageState extends State<DashboardPage> {
   int _selectedIndex = -1;
   late HubConnection hubConnection;
   double? _currentWeight;
-  String _selectedTimeframe = '1h';
+  String _selectedTimeframe = '24h';
   bool _isInitialLoading = true;
   final TransformationController _chartTransformController =
       TransformationController();
@@ -79,6 +79,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Indicator> _indicators = [];
   List<ColData> _colData = [];
   List<SiloHistoryModel> _siloHistory = [];
+  int _lastProcessedId = -1;
 
   List<Map<String, String>> _pumpPlanRows = [];
   Timer? _pumpTimer;
@@ -211,16 +212,12 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _startSiloHistoryStream() async {
     if (!mounted) return;
 
-    final historyId = _resolveHistoryId();
-
     await _historySubscription?.cancel();
     _historySubscription = _siloApiService
-        .watchHistory(sync: -1, id: historyId)
+        .watchHistory(sync: -1, id: -1)
         .listen((rows) {
       if (!mounted) return;
-      setState(() {
-        _siloHistory = rows;
-      });
+      _applySiloHistoryUpdate(rows);
     }, onError: (error) {
       debugPrint('Error polling silo history: $error');
     });
@@ -230,18 +227,61 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _refreshSiloHistory() async {
     try {
+      final queryId = _lastProcessedId >= 0 ? _lastProcessedId : -1;
       final rows = await _siloApiService.fetchHistory(
         sync: -1,
-        id: _resolveHistoryId(),
+        id: queryId,
       );
 
       if (!mounted) return;
-      setState(() {
-        _siloHistory = rows;
-      });
+      _applySiloHistoryUpdate(rows);
     } catch (e) {
       debugPrint('Error refreshing silo history: $e');
     }
+  }
+
+  void _applySiloHistoryUpdate(List<SiloHistoryModel> rows) {
+    if (rows.isEmpty || !mounted) return;
+
+    final sortedRows = [...rows]..sort((a, b) => a.id.compareTo(b.id));
+    final latest = sortedRows.last;
+
+    // Luôn seed lần đầu để biểu đồ có line hiển thị.
+    if (_siloHistory.isEmpty || _lastProcessedId < 0) {
+      setState(() {
+        _siloHistory = sortedRows;
+        _lastProcessedId = latest.id;
+      });
+      return;
+    }
+
+    final unchangedWeight = latest.weightNow == latest.weightPre;
+    final duplicatedId = latest.id == _lastProcessedId;
+    final notNewerThanLast = latest.id < _lastProcessedId;
+
+    if (unchangedWeight || duplicatedId || notNewerThanLast) {
+      return;
+    }
+
+    final newRows = sortedRows.where((row) => row.id > _lastProcessedId).toList();
+    if (newRows.isEmpty) return;
+
+    final merged = <SiloHistoryModel>[..._siloHistory, ...newRows]
+      ..sort((a, b) => a.id.compareTo(b.id));
+
+    // Chặn trùng ID khi endpoint trả dữ liệu chồng lặp theo lower-bound.
+    final deduped = <SiloHistoryModel>[];
+    var previousId = -1;
+    for (final row in merged) {
+      if (row.id == previousId) continue;
+      deduped.add(row);
+      previousId = row.id;
+    }
+
+    setState(() {
+      _siloHistory = deduped;
+      _lastProcessedId = latest.id;
+    });
   }
 
   int _resolveHistoryId() {
@@ -708,13 +748,54 @@ class _DashboardPageState extends State<DashboardPage> {
       timeframe: timeframeDuration,
     );
 
-    final points = rows
+    // Nếu filter theo timeframe rỗng thì lấy tạm 20 điểm gần nhất để tránh chart trống.
+    final sourceRows = rows.isNotEmpty
+      ? rows
+      : (_siloHistory.length > 20
+        ? _siloHistory.sublist(_siloHistory.length - 20)
+        : _siloHistory);
+
+    final points = sourceRows
+        .where((row) {
+          final timestamp = row.time.millisecondsSinceEpoch;
+          final weight = row.weightNow;
+
+          // Chỉ giữ điểm có thời gian/khối lượng hợp lệ và khác 0.
+          if (timestamp <= 0) return false;
+          if (weight <= 0) return false;
+          if (weight.isNaN || weight.isInfinite) return false;
+
+          return true;
+        })
         .map((row) => _SiloVolumePoint(
-              time: row.recordTime,
-              weight: row.weight,
+              time: row.time,
+              weight: row.weightNow.toDouble(),
             ))
         .toList()
       ..sort((a, b) => a.time.compareTo(b.time));
+
+    // Fallback lần cuối: nếu toàn bộ điểm bị loại thì thử lấy lại từ 20 điểm mới nhất không qua filter timeframe.
+    if (points.isEmpty) {
+      final latestRows = _siloHistory.length > 20
+          ? _siloHistory.sublist(_siloHistory.length - 20)
+          : _siloHistory;
+
+      return latestRows
+          .map((row) => _SiloVolumePoint(
+                time: row.time,
+                weight: row.weightNow.toDouble(),
+              ))
+          .where((point) {
+            final timestamp = point.time.millisecondsSinceEpoch;
+            final weight = point.weight;
+            if (timestamp <= 0) return false;
+            if (weight <= 0) return false;
+            if (weight.isNaN || weight.isInfinite) return false;
+            return true;
+          })
+          .toList()
+        ..sort((a, b) => a.time.compareTo(b.time));
+    }
 
     return points;
   }
@@ -746,6 +827,8 @@ class _DashboardPageState extends State<DashboardPage> {
       3 => 0.93,
       _ => 0.88,
     };
+
+    final chartPoints = _buildSiloVolumePoints();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -785,7 +868,8 @@ class _DashboardPageState extends State<DashboardPage> {
           title: _silos.isNotEmpty
               ? 'Biểu đồ khối lượng ${_silos.first.id}'
               : 'Biểu đồ khối lượng Silo',
-          points: _buildSiloVolumePoints(),
+          points: chartPoints,
+          rawCount: _siloHistory.length,
           selectedTimeframe: _selectedTimeframe,
           timeframeOptions: _timeframeDurations.keys.toList(growable: false),
           onTimeframeSelected: _handleTimeframeSelected,
@@ -1340,6 +1424,7 @@ class _SiloVolumePoint {
 class SiloVolumeChart extends StatelessWidget {
   final String title;
   final List<_SiloVolumePoint> points;
+  final int rawCount;
   final String selectedTimeframe;
   final List<String> timeframeOptions;
   final ValueChanged<String> onTimeframeSelected;
@@ -1349,52 +1434,57 @@ class SiloVolumeChart extends StatelessWidget {
     super.key,
     required this.title,
     required this.points,
+    required this.rawCount,
     required this.selectedTimeframe,
     required this.timeframeOptions,
     required this.onTimeframeSelected,
     required this.transformationController,
   });
 
-  String _formatTime(DateTime dateTime, String timeframe) {
-    if (timeframe == '1ph' || timeframe == '5ph' || timeframe == '30ph') {
-      final hour = dateTime.hour.toString().padLeft(2, '0');
-      final minute = dateTime.minute.toString().padLeft(2, '0');
-      final second = dateTime.second.toString().padLeft(2, '0');
-      return '$hour:$minute:$second';
-    }
+  String _formatTimeHms(DateTime dateTime) {
+    final local = dateTime.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    final second = local.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
+  }
 
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
+  String _formatWeightAxis(double value) {
+    if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(1)}k';
+    }
+    return value.toStringAsFixed(0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final chartPoints = points
-        .map(
-          (point) => FlSpot(
-            point.time.millisecondsSinceEpoch.toDouble(),
-            point.weight,
-          ),
-        )
-        .toList();
+    final chartPoints = <FlSpot>[];
+    for (final point in points) {
+      final x = point.time.millisecondsSinceEpoch.toDouble();
+      final y = point.weight.toDouble();
+
+      if (x <= 0 || x.isNaN || x.isInfinite) continue;
+      if (y <= 0 || y.isNaN || y.isInfinite) continue;
+
+      chartPoints.add(FlSpot(x, y));
+    }
 
     final hasData = chartPoints.isNotEmpty;
+    final validCount = chartPoints.length;
     final minXRaw = hasData ? chartPoints.first.x : 0.0;
     final maxXRaw = hasData ? chartPoints.last.x : 1.0;
     final minX = minXRaw;
     final maxX = (maxXRaw - minXRaw).abs() < 1
       ? minXRaw + const Duration(minutes: 1).inMilliseconds
       : maxXRaw;
-    final minYRaw = hasData
-        ? chartPoints.map((spot) => spot.y).reduce((a, b) => a < b ? a : b)
-        : 0.0;
-    final maxYRaw = hasData
-        ? chartPoints.map((spot) => spot.y).reduce((a, b) => a > b ? a : b)
-        : 100.0;
-    final yPadding = (maxYRaw - minYRaw).abs() < 1 ? 5.0 : (maxYRaw - minYRaw) * 0.2;
-    final minY = (minYRaw - yPadding).clamp(0.0, double.infinity);
-    final maxY = maxYRaw + yPadding;
+    final minWeight = hasData
+      ? chartPoints.map((spot) => spot.y).reduce((a, b) => a < b ? a : b)
+      : 0.0;
+    final maxWeight = hasData
+      ? chartPoints.map((spot) => spot.y).reduce((a, b) => a > b ? a : b)
+      : 50000.0;
+    final minY = hasData ? minWeight * 0.9 : 0.0;
+    final maxY = hasData ? maxWeight * 1.1 : 50000.0;
     final xInterval = hasData
       ? (((maxX - minX) / 4).clamp(1.0, double.infinity) as double)
       : 1.0;
@@ -1407,9 +1497,31 @@ class SiloVolumeChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Text(
+                    'debug $rawCount/$validCount',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.orange.shade900,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             SingleChildScrollView(
@@ -1431,138 +1543,144 @@ class SiloVolumeChart extends StatelessWidget {
             const SizedBox(height: 12),
             SizedBox(
               height: 320,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: hasData
-                    ? InteractiveViewer(
-                        transformationController: transformationController,
-                        minScale: 1.0,
-                        maxScale: 6.0,
-                        panEnabled: true,
-                        scaleEnabled: true,
-                        child: LineChart(
-                          LineChartData(
-                            clipData: FlClipData.all(),
-                            minX: minX,
-                            maxX: maxX,
-                            minY: minY,
-                            maxY: maxY,
-                            gridData: FlGridData(
-                              show: true,
-                              drawVerticalLine: true,
-                              horizontalInterval: yInterval,
-                              verticalInterval: xInterval,
-                            ),
-                            titlesData: FlTitlesData(
-                              leftTitles: AxisTitles(
-                                axisNameWidget: const Padding(
-                                  padding: EdgeInsets.only(bottom: 8),
-                                  child: Text(
-                                    'Khối lượng Silo',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                ),
-                                sideTitles: SideTitles(
-                                  showTitles: true,
-                                  reservedSize: 58,
-                                  getTitlesWidget: (value, meta) => SideTitleWidget(
-                                    axisSide: meta.axisSide,
+              child: RepaintBoundary(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: hasData
+                      ? InteractiveViewer(
+                          transformationController: transformationController,
+                          minScale: 1.0,
+                          maxScale: 6.0,
+                          panEnabled: true,
+                          scaleEnabled: true,
+                          clipBehavior: Clip.hardEdge,
+                          child: LineChart(
+                            LineChartData(
+                              clipData: FlClipData.all(),
+                              baselineY: minY,
+                              minX: minX,
+                              maxX: maxX,
+                              minY: minY,
+                              maxY: maxY,
+                              gridData: FlGridData(
+                                show: true,
+                                drawVerticalLine: true,
+                                horizontalInterval: yInterval,
+                                verticalInterval: xInterval,
+                              ),
+                              titlesData: FlTitlesData(
+                                leftTitles: AxisTitles(
+                                  axisNameWidget: const Padding(
+                                    padding: EdgeInsets.only(bottom: 8),
                                     child: Text(
-                                      '${value.toStringAsFixed(0)} kg',
-                                      style: const TextStyle(fontSize: 10),
+                                      'Khối lượng Silo',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    reservedSize: 58,
+                                    getTitlesWidget: (value, meta) => SideTitleWidget(
+                                      axisSide: meta.axisSide,
+                                      child: Text(
+                                        _formatWeightAxis(value),
+                                        style: const TextStyle(fontSize: 10),
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                              bottomTitles: AxisTitles(
-                                axisNameWidget: const Padding(
-                                  padding: EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    'Thời gian',
-                                    style: TextStyle(fontSize: 11),
+                                bottomTitles: AxisTitles(
+                                  axisNameWidget: const Padding(
+                                    padding: EdgeInsets.only(top: 8),
+                                    child: Text(
+                                      'Thời gian',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    interval: xInterval,
+                                    reservedSize: 36,
+                                    getTitlesWidget: (value, meta) {
+                                      final dateTime = DateTime.fromMillisecondsSinceEpoch(
+                                        value.toInt(),
+                                      );
+
+                                      return SideTitleWidget(
+                                        axisSide: meta.axisSide,
+                                        child: Text(
+                                          _formatTimeHms(dateTime),
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                                sideTitles: SideTitles(
-                                  showTitles: true,
-                                  interval: xInterval,
-                                  reservedSize: 36,
-                                  getTitlesWidget: (value, meta) {
-                                    final dateTime = DateTime.fromMillisecondsSinceEpoch(
-                                      value.toInt(),
-                                    );
+                                topTitles: const AxisTitles(
+                                  sideTitles: SideTitles(showTitles: false),
+                                ),
+                                rightTitles: const AxisTitles(
+                                  sideTitles: SideTitles(showTitles: false),
+                                ),
+                              ),
+                              borderData: FlBorderData(show: true),
+                              lineTouchData: LineTouchData(
+                                enabled: true,
+                                handleBuiltInTouches: true,
+                                touchTooltipData: LineTouchTooltipData(
+                                  getTooltipItems: (touchedSpots) {
+                                    return touchedSpots.map((spot) {
+                                      final spotTime =
+                                          DateTime.fromMillisecondsSinceEpoch(
+                                        spot.x.toInt(),
+                                      );
 
-                                    return SideTitleWidget(
-                                      axisSide: meta.axisSide,
-                                      child: Text(
-                                        _formatTime(dateTime, selectedTimeframe),
-                                        style: const TextStyle(fontSize: 10),
-                                      ),
-                                    );
+                                      return LineTooltipItem(
+                                        '${spot.y.toStringAsFixed(2)} kg\n${_formatTimeHms(spotTime)}',
+                                        const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      );
+                                    }).toList();
                                   },
                                 ),
                               ),
-                              topTitles: const AxisTitles(
-                                sideTitles: SideTitles(showTitles: false),
-                              ),
-                              rightTitles: const AxisTitles(
-                                sideTitles: SideTitles(showTitles: false),
-                              ),
-                            ),
-                            borderData: FlBorderData(show: true),
-                            lineTouchData: LineTouchData(
-                              enabled: true,
-                              handleBuiltInTouches: true,
-                              touchTooltipData: LineTouchTooltipData(
-                                getTooltipItems: (touchedSpots) {
-                                  return touchedSpots.map((spot) {
-                                    final spotTime =
-                                        DateTime.fromMillisecondsSinceEpoch(
-                                      spot.x.toInt(),
-                                    );
-
-                                    return LineTooltipItem(
-                                      '${spot.y.toStringAsFixed(2)} kg\n${_formatTime(spotTime, selectedTimeframe)}',
-                                      const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    );
-                                  }).toList();
-                                },
-                              ),
-                            ),
-                            lineBarsData: [
-                              LineChartBarData(
-                                spots: chartPoints,
-                                isCurved: true,
-                                gradient: LinearGradient(
-                                  colors: [Colors.blue.shade500, Colors.cyan.shade400],
-                                ),
-                                barWidth: 3,
-                                isStrokeCapRound: true,
-                                dotData: const FlDotData(show: false),
-                                belowBarData: BarAreaData(
-                                  show: true,
+                              lineBarsData: [
+                                LineChartBarData(
+                                  spots: chartPoints,
+                                  isCurved: true,
+                                  preventCurveOverShooting: true,
                                   gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      Colors.blue.withValues(alpha: 0.24),
-                                      Colors.blue.withValues(alpha: 0.04),
-                                    ],
+                                    colors: [Colors.blue.shade500, Colors.cyan.shade400],
+                                  ),
+                                  barWidth: 3,
+                                  isStrokeCapRound: true,
+                                  dotData: const FlDotData(show: false),
+                                  belowBarData: BarAreaData(
+                                    show: true,
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.blue.withValues(alpha: 0.24),
+                                        Colors.blue.withValues(alpha: 0.04),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
+                            duration: Duration.zero,
+                          ),
+                        )
+                      : const Center(
+                          child: Text(
+                            'Chưa có dữ liệu trong khung thời gian đã chọn',
+                            style: TextStyle(color: Colors.black54),
                           ),
                         ),
-                      )
-                    : const Center(
-                        child: Text(
-                          'Chưa có dữ liệu trong khung thời gian đã chọn',
-                          style: TextStyle(color: Colors.black54),
-                        ),
-                      ),
+                ),
               ),
             ),
           ],

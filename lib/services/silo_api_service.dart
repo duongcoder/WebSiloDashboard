@@ -90,10 +90,10 @@ class SiloApiService {
   void _startPolling({required int sync, required int id}) {
     stopPolling();
 
-    _emitLatest(sync: sync, id: id);
+    _emitLatest(sync: sync, id: _resolvePollingId(baseId: id));
 
     _pollTimer = Timer.periodic(pollingInterval, (_) {
-      _emitLatest(sync: sync, id: id);
+      _emitLatest(sync: sync, id: _resolvePollingId(baseId: id));
     });
   }
 
@@ -108,5 +108,17 @@ class SiloApiService {
         _historyController.addError(error);
       }
     }
+  }
+
+  int _resolvePollingId({required int baseId}) {
+    if (baseId >= 0) return baseId;
+
+    if (_latestHistory.isEmpty) return -1;
+
+    final latestId = _latestHistory
+        .map((row) => row.id)
+        .reduce((a, b) => a > b ? a : b);
+
+    return latestId;
   }
 }
