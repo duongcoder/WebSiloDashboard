@@ -13,6 +13,7 @@ import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
 import 'services/scale_service.dart';
+import 'services/excel_export_service.dart';
 import 'services/sql_service.dart';
 import 'widgets/silo_module.dart';
 
@@ -722,6 +723,7 @@ class _DashboardPageState extends State<DashboardPage> {
     required List<Map<String, String>> rows,
     required String addSnackBarText,
     required String deleteSnackBarText,
+    required String exportFilePrefix,
   }) {
     return Card(
       elevation: 4,
@@ -735,6 +737,23 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final result = await exportPlanRowsToExcel(
+                      filePrefix: exportFilePrefix,
+                      rows: rows,
+                    );
+
+                    if (!mounted) return;
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(result.message)),
+                    );
+                  },
+                  icon: const Icon(Icons.table_view),
+                  label: const Text('Xuất excel'),
+                ),
+                const SizedBox(width: 8),
                 ElevatedButton.icon(
                   onPressed: () async {
                     final result = await showDialog<Map<String, String>>(
@@ -904,6 +923,7 @@ class _DashboardPageState extends State<DashboardPage> {
       rows: _pumpPlanRows,
       addSnackBarText: 'Đã thêm kế hoạch',
       deleteSnackBarText: 'Đã xóa kế hoạch',
+      exportFilePrefix: 'ke_hoach_bom',
     );
   }
 
@@ -913,6 +933,7 @@ class _DashboardPageState extends State<DashboardPage> {
       rows: _dumpPlanRows,
       addSnackBarText: 'Đã thêm kế hoạch xả',
       deleteSnackBarText: 'Đã xóa kế hoạch xả',
+      exportFilePrefix: 'ke_hoach_xa',
     );
   }
 
