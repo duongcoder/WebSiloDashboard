@@ -87,19 +87,26 @@ class _SiloModuleState extends State<SiloModule> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 420;
+        // Dùng breakpoint theo kích thước thật của màn hình để tránh bị parent ép width nhỏ.
+        final screenWidth = MediaQuery.of(context).size.width;
 
-        // Standard breakpoints:
+        // Standard breakpoint:
         // - Mobile: <640 (Column)
-        // - Tablet: 768..1024
-        // - Desktop: >1024 (Row)
-        final isMobile = width < 640;
-        final isDesktop = width > 1024;
+        // - Desktop/tablet: >=640 (Row)
+        final isMobile = screenWidth < 640;
+
 
         // Gauge scale (clamp to avoid overflow)
-        final siloWidth = (width * 0.28).clamp(70.0, 130.0);
+        // Gauge scale dựa theo width thực tế của vùng layout hiện tại.
+        // Dù breakpoint dùng screenWidth, kích thước gauge vẫn dùng width từ constraints để không bị quá to/nhỏ.
+        final localWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : screenWidth * 0.5;
+
+        final siloWidth = (localWidth * 0.28).clamp(70.0, 130.0);
         final gaugeHeight = (siloWidth * (isMobile ? 1.8 : 2.0))
             .clamp(isMobile ? 160.0 : 220.0, isMobile ? 320.0 : 360.0);
+
 
         final sidePadding = isMobile ? 10.0 : 16.0;
         final headerFontSize = isMobile ? 16.0 : 18.0;
@@ -148,8 +155,9 @@ class _SiloModuleState extends State<SiloModule> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Flexible(fit: FlexFit.loose, child: Center(child: gauge)),
-                  SizedBox(width: width * 0.03),
+                  SizedBox(width: localWidth * 0.03),
                   Flexible(fit: FlexFit.loose, child: Align(alignment: Alignment.centerLeft, child: weightInfo)),
+
                 ],
               );
 
@@ -169,8 +177,9 @@ class _SiloModuleState extends State<SiloModule> {
                   physics: const BouncingScrollPhysics(),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    children: [
+                  children: [
                       Text(
+
                         widget.id,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
@@ -223,6 +232,7 @@ class _WeightInfo extends StatelessWidget {
   final double valueFontSize;
   final String weightValue;
   final bool isMobile;
+
 
   const _WeightInfo({
     required this.labelFontSize,

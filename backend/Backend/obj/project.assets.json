@@ -3462,11 +3462,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\Backend.csproj",
+      "projectUniqueName": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\Backend.csproj",
       "projectName": "Backend",
-      "projectPath": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\Backend.csproj",
+      "projectPath": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\Backend.csproj",
       "packagesPath": "C:\\Users\\tranm\\.nuget\\packages\\",
-      "outputPath": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\obj\\",
+      "outputPath": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
