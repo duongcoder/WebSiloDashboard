@@ -101,5 +101,28 @@ namespace Backend.Controllers
 
             return Content(scaleResponse.Content!, "application/json");
         }
+
+        // Endpoint: GET api/Scales/GetHistory?sync=-1&Id=-1
+        // Proxy qua backend để tránh lỗi CORS khi Flutter Web gọi trực tiếp dịch vụ ngoài.
+        [HttpGet("GetHistory")]
+        public async Task<IActionResult> GetHistory(int sync = -1, int id = -1)
+        {
+            var token = await GetToken();
+            if (string.IsNullOrEmpty(token))
+                return BadRequest("access_token not found");
+
+            var scaleClient = new RestClient(_dbUrl);
+            var historyRequest = new RestRequest($"/api/Scales/GetHistory?sync={sync}&Id={id}", Method.Get);
+            historyRequest.AddHeader("Authorization", $"Bearer {token}");
+
+            var historyResponse = await scaleClient.ExecuteAsync(historyRequest);
+            if (!historyResponse.IsSuccessful)
+            {
+                _logger.LogError("GetHistory failed: {msg}", historyResponse.Content);
+                return StatusCode((int)historyResponse.StatusCode, historyResponse.Content);
+            }
+
+            return Content(historyResponse.Content!, "application/json");
+        }
     }
 }

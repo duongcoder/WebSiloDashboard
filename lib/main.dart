@@ -13,8 +13,10 @@ import 'models/col_data.dart';
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
+import 'models/silo_history_model.dart';
 import 'services/scale_service.dart';
 import 'services/excel_export_service.dart';
+import 'services/silo_api_service.dart';
 import 'services/sql_service.dart';
 import 'widgets/silo_module.dart';
 
@@ -52,14 +54,31 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const Map<String, Duration> _timeframeDurations = {
+    '1ph': Duration(minutes: 1),
+    '5ph': Duration(minutes: 5),
+    '30ph': Duration(minutes: 30),
+    '1h': Duration(hours: 1),
+    '4h': Duration(hours: 4),
+    '12h': Duration(hours: 12),
+    '24h': Duration(hours: 24),
+  };
+
   int _selectedIndex = -1;
   late HubConnection hubConnection;
   double? _currentWeight;
+  String _selectedTimeframe = '1h';
+  bool _isInitialLoading = true;
+  final TransformationController _chartTransformController =
+      TransformationController();
+  late final SiloApiService _siloApiService;
+  StreamSubscription<List<SiloHistoryModel>>? _historySubscription;
 
   List<Silo> _silos = [];
   List<Controller> _controllers = [];
   List<Indicator> _indicators = [];
   List<ColData> _colData = [];
+  List<SiloHistoryModel> _siloHistory = [];
 
   List<Map<String, String>> _pumpPlanRows = [];
   Timer? _pumpTimer;
@@ -91,12 +110,13 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    _siloApiService = SiloApiService(
+      pollingInterval: const Duration(seconds: 5),
+    );
     _initSignalR();
-    _loadSilos();
-    _loadIndicators();
-    _loadControllers();
-    _loadColData();
-    _loadScales();
+    _loadInitialData().whenComplete(() {
+      _startSiloHistoryStream();
+    });
 
     _pumpTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _fetchPumpPlan();
@@ -106,6 +126,9 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void dispose() {
     _pumpTimer?.cancel();
+    _historySubscription?.cancel();
+    _siloApiService.dispose();
+    _chartTransformController.dispose();
     hubConnection.stop();
     super.dispose();
   }
@@ -118,16 +141,25 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> schedulers = data['schedulers'];
+        final schedulersRaw = data is Map<String, dynamic>
+            ? data['schedulers']
+            : null;
+        final List<dynamic> schedulers =
+            schedulersRaw is List ? schedulersRaw : <dynamic>[];
 
+        if (!mounted) return;
         setState(() {
           _pumpPlanRows = schedulers.map((item) {
+            final map = item is Map<String, dynamic>
+                ? item
+                : <String, dynamic>{};
+
             return {
-              'time': (item['timeStart'] ?? '').toString(),
-              'silo': 'Silo ${item['id_relay']}',
-              'material': (item['des'] ?? '').toString(),
-              'qty': (item['weight'] ?? '').toString(),
-              'status': _mapStatus(item['status'] as int),
+              'time': (map['timeStart'] ?? '').toString(),
+              'silo': 'Silo ${(map['id_relay'] ?? '').toString()}',
+              'material': (map['des'] ?? '').toString(),
+              'qty': (map['weight'] ?? '').toString(),
+              'status': _mapStatus(_parseStatus(map['status'])),
             };
           }).toList();
         });
@@ -150,40 +182,135 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> _initSignalR() async {
-    hubConnection = HubConnectionBuilder()
-        .withUrl('http://${AppConfig.serverIp}:${AppConfig.apiPort}/siloHub')
-        .build();
+  int _parseStatus(dynamic value) {
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? -1;
+    return -1;
+  }
 
-    hubConnection.on('ReceiveScaleValue', (List<Object?>? args) {
-      if (args == null || args.isEmpty) return;
+  Future<void> _loadInitialData() async {
+    await Future.wait([
+      _loadSilos(),
+      _loadIndicators(),
+      _loadControllers(),
+      _loadColData(),
+      _fetchPumpPlan(),
+    ]);
 
-      final raw = args[0];
+    // Scale API là nguồn ngoài, chỉ dùng bổ sung nếu backend local chưa có dữ liệu silo.
+    if (_silos.isEmpty) {
+      await _loadScales();
+    }
 
-      if (raw is Map<String, dynamic>) {
-        setState(() {
-          _currentWeight = (raw['value'] as num).toDouble();
-        });
-      } else if (raw is String) {
-        final data = jsonDecode(raw);
-        setState(() {
-          _currentWeight = (data['value'] as num).toDouble();
-        });
-      } else if (raw is num) {
-        setState(() {
-          _currentWeight = raw.toDouble();
-        });
-      }
+    if (!mounted) return;
+    setState(() {
+      _isInitialLoading = false;
+    });
+  }
+
+  Future<void> _startSiloHistoryStream() async {
+    if (!mounted) return;
+
+    final historyId = _resolveHistoryId();
+
+    await _historySubscription?.cancel();
+    _historySubscription = _siloApiService
+        .watchHistory(sync: -1, id: historyId)
+        .listen((rows) {
+      if (!mounted) return;
+      setState(() {
+        _siloHistory = rows;
+      });
+    }, onError: (error) {
+      debugPrint('Error polling silo history: $error');
     });
 
-    await hubConnection.start();
+    await _refreshSiloHistory();
+  }
+
+  Future<void> _refreshSiloHistory() async {
+    try {
+      final rows = await _siloApiService.fetchHistory(
+        sync: -1,
+        id: _resolveHistoryId(),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _siloHistory = rows;
+      });
+    } catch (e) {
+      debugPrint('Error refreshing silo history: $e');
+    }
+  }
+
+  int _resolveHistoryId() {
+    if (_silos.isEmpty) return -1;
+
+    final siloId = _silos.first.id;
+    final direct = int.tryParse(siloId);
+    if (direct != null) return direct;
+
+    final extracted = RegExp(r'\d+').firstMatch(siloId)?.group(0);
+    return int.tryParse(extracted ?? '') ?? -1;
+  }
+
+  Future<void> _initSignalR() async {
+    try {
+      hubConnection = HubConnectionBuilder()
+          .withUrl('http://${AppConfig.serverIp}:${AppConfig.apiPort}/siloHub')
+          .build();
+
+      hubConnection.on('ReceiveScaleValue', (List<Object?>? args) {
+        if (args == null || args.isEmpty || !mounted) return;
+
+        final raw = args[0];
+
+        if (raw is Map<String, dynamic>) {
+          setState(() {
+            _currentWeight = (raw['value'] as num).toDouble();
+          });
+        } else if (raw is String) {
+          final data = jsonDecode(raw);
+          setState(() {
+            _currentWeight = (data['value'] as num).toDouble();
+          });
+        } else if (raw is num) {
+          setState(() {
+            _currentWeight = raw.toDouble();
+          });
+        }
+      });
+
+      await hubConnection.start();
+    } catch (e) {
+      debugPrint('Error initializing SignalR: $e');
+    }
   }
 
   Future<void> _loadScales() async {
     try {
       final data = await ScaleService.getListScales();
+      final mapped = <Silo>[];
+
+      for (final item in data) {
+        if (item is! Map<String, dynamic>) continue;
+
+        try {
+          mapped.add(Silo.fromJson(item));
+        } catch (_) {
+          // Bỏ qua record không khớp schema để tránh crash toàn màn hình.
+        }
+      }
+
+      if (mapped.isEmpty) return;
+
+      if (!mounted) return;
       setState(() {
-        _silos = data.map((e) => Silo.fromJson(e)).toList();
+        // Chỉ dùng dữ liệu scale khi local silos rỗng để tránh ghi đè nguồn chính.
+        if (_silos.isEmpty) {
+          _silos = mapped;
+        }
       });
     } catch (e) {
       debugPrint('Error loading scales: $e');
@@ -193,6 +320,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _loadSilos() async {
     try {
       final silos = await ApiService.fetchSilos();
+      if (!mounted) return;
       setState(() {
         _silos = silos;
       });
@@ -204,6 +332,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _loadIndicators() async {
     try {
       final indicators = await ApiService.fetchIndicators();
+      if (!mounted) return;
       setState(() {
         _indicators = indicators;
       });
@@ -215,6 +344,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _loadControllers() async {
     try {
       final controllers = await ApiService.fetchControllers();
+      if (!mounted) return;
       setState(() {
         _controllers = controllers;
       });
@@ -226,6 +356,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _loadColData() async {
     try {
       final colDataList = await ApiService.fetchColData();
+      if (!mounted) return;
       setState(() {
         _colData = colDataList;
       });
@@ -566,77 +697,35 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildColDataChart() {
-    final sampleData = [
-      {'date': '06-10', 'weight': 1200.0},
-      {'date': '06-11', 'weight': 1350.0},
-      {'date': '06-12', 'weight': 980.0},
-      {'date': '06-13', 'weight': 1500.0},
-      {'date': '06-14', 'weight': 1100.0},
-      {'date': '06-15', 'weight': 1600.0},
-      {'date': '06-16', 'weight': 1400.0},
-    ];
+  List<_SiloVolumePoint> _buildSiloVolumePoints() {
+    if (_siloHistory.isEmpty) return const <_SiloVolumePoint>[];
 
-    return SizedBox(
-      height: 300,
-      child: BarChart(
-        BarChartData(
-          alignment: BarChartAlignment.spaceAround,
-          titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: true),
-            ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, _) {
-                  final index = value.toInt();
-                  if (index < 0 || index >= sampleData.length) {
-                    return const SizedBox.shrink();
-                  }
-                  return Text(
-                    sampleData[index]['date'] as String,
-                    style: const TextStyle(fontSize: 10),
-                  );
-                },
-              ),
-            ),
-            topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-          ),
-          barGroups: sampleData.asMap().entries.map((entry) {
-            final index = entry.key;
-            final weight = entry.value['weight'] as double;
-            return BarChartGroupData(
-              x: index,
-              barRods: [
-                BarChartRodData(
-                  toY: weight,
-                  color: Colors.blue,
-                  width: 26,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-              ],
-            );
-          }).toList(),
-          barTouchData: BarTouchData(
-            enabled: true,
-            touchTooltipData: BarTouchTooltipData(
-              getTooltipItem: (group, _, rod, __) {
-                return BarTooltipItem(
-                  '${rod.toY.toStringAsFixed(0)} kg',
-                  const TextStyle(color: Colors.white),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
+    final timeframeDuration = _timeframeDurations[_selectedTimeframe] ??
+        const Duration(hours: 1);
+
+    final rows = _siloApiService.filterByTimeframe(
+      source: _siloHistory,
+      timeframe: timeframeDuration,
     );
+
+    final points = rows
+        .map((row) => _SiloVolumePoint(
+              time: row.recordTime,
+              weight: row.weight,
+            ))
+        .toList()
+      ..sort((a, b) => a.time.compareTo(b.time));
+
+    return points;
+  }
+
+  void _handleTimeframeSelected(String timeframe) {
+    setState(() {
+      _selectedTimeframe = timeframe;
+      _chartTransformController.value = Matrix4.identity();
+    });
+
+    _refreshSiloHistory();
   }
 
   Widget _buildModulesAndChartSection(double maxWidth) {
@@ -692,11 +781,16 @@ class _DashboardPageState extends State<DashboardPage> {
           }).toList(),
         ),
         const SizedBox(height: 20),
-        const Text(
-          'Biểu đồ khối lượng Silo1',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        SiloVolumeChart(
+          title: _silos.isNotEmpty
+              ? 'Biểu đồ khối lượng ${_silos.first.id}'
+              : 'Biểu đồ khối lượng Silo',
+          points: _buildSiloVolumePoints(),
+          selectedTimeframe: _selectedTimeframe,
+          timeframeOptions: _timeframeDurations.keys.toList(growable: false),
+          onTimeframeSelected: _handleTimeframeSelected,
+          transformationController: _chartTransformController,
         ),
-        _buildColDataChart(),
       ],
     );
   }
@@ -1219,7 +1313,7 @@ class _DashboardPageState extends State<DashboardPage> {
     const sidebarWidth = 280.0;
     final screenWidth = MediaQuery.of(context).size.width;
 
-    if (_controllers.isEmpty) {
+    if (_isInitialLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
@@ -1230,5 +1324,250 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return _buildDesktopDashboard(sidebarWidth);
+  }
+}
+
+class _SiloVolumePoint {
+  final DateTime time;
+  final double weight;
+
+  const _SiloVolumePoint({
+    required this.time,
+    required this.weight,
+  });
+}
+
+class SiloVolumeChart extends StatelessWidget {
+  final String title;
+  final List<_SiloVolumePoint> points;
+  final String selectedTimeframe;
+  final List<String> timeframeOptions;
+  final ValueChanged<String> onTimeframeSelected;
+  final TransformationController transformationController;
+
+  const SiloVolumeChart({
+    super.key,
+    required this.title,
+    required this.points,
+    required this.selectedTimeframe,
+    required this.timeframeOptions,
+    required this.onTimeframeSelected,
+    required this.transformationController,
+  });
+
+  String _formatTime(DateTime dateTime, String timeframe) {
+    if (timeframe == '1ph' || timeframe == '5ph' || timeframe == '30ph') {
+      final hour = dateTime.hour.toString().padLeft(2, '0');
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      final second = dateTime.second.toString().padLeft(2, '0');
+      return '$hour:$minute:$second';
+    }
+
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chartPoints = points
+        .map(
+          (point) => FlSpot(
+            point.time.millisecondsSinceEpoch.toDouble(),
+            point.weight,
+          ),
+        )
+        .toList();
+
+    final hasData = chartPoints.isNotEmpty;
+    final minXRaw = hasData ? chartPoints.first.x : 0.0;
+    final maxXRaw = hasData ? chartPoints.last.x : 1.0;
+    final minX = minXRaw;
+    final maxX = (maxXRaw - minXRaw).abs() < 1
+      ? minXRaw + const Duration(minutes: 1).inMilliseconds
+      : maxXRaw;
+    final minYRaw = hasData
+        ? chartPoints.map((spot) => spot.y).reduce((a, b) => a < b ? a : b)
+        : 0.0;
+    final maxYRaw = hasData
+        ? chartPoints.map((spot) => spot.y).reduce((a, b) => a > b ? a : b)
+        : 100.0;
+    final yPadding = (maxYRaw - minYRaw).abs() < 1 ? 5.0 : (maxYRaw - minYRaw) * 0.2;
+    final minY = (minYRaw - yPadding).clamp(0.0, double.infinity);
+    final maxY = maxYRaw + yPadding;
+    final xInterval = hasData
+      ? (((maxX - minX) / 4).clamp(1.0, double.infinity) as double)
+      : 1.0;
+    final yInterval = (((maxY - minY) / 5).clamp(1.0, double.infinity) as double);
+
+    return Card(
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: timeframeOptions.map((option) {
+                  final selected = option == selectedTimeframe;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(option),
+                      selected: selected,
+                      onSelected: (_) => onTimeframeSelected(option),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 320,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: hasData
+                    ? InteractiveViewer(
+                        transformationController: transformationController,
+                        minScale: 1.0,
+                        maxScale: 6.0,
+                        panEnabled: true,
+                        scaleEnabled: true,
+                        child: LineChart(
+                          LineChartData(
+                            clipData: FlClipData.all(),
+                            minX: minX,
+                            maxX: maxX,
+                            minY: minY,
+                            maxY: maxY,
+                            gridData: FlGridData(
+                              show: true,
+                              drawVerticalLine: true,
+                              horizontalInterval: yInterval,
+                              verticalInterval: xInterval,
+                            ),
+                            titlesData: FlTitlesData(
+                              leftTitles: AxisTitles(
+                                axisNameWidget: const Padding(
+                                  padding: EdgeInsets.only(bottom: 8),
+                                  child: Text(
+                                    'Khối lượng Silo',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  reservedSize: 58,
+                                  getTitlesWidget: (value, meta) => SideTitleWidget(
+                                    axisSide: meta.axisSide,
+                                    child: Text(
+                                      '${value.toStringAsFixed(0)} kg',
+                                      style: const TextStyle(fontSize: 10),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              bottomTitles: AxisTitles(
+                                axisNameWidget: const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    'Thời gian',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  interval: xInterval,
+                                  reservedSize: 36,
+                                  getTitlesWidget: (value, meta) {
+                                    final dateTime = DateTime.fromMillisecondsSinceEpoch(
+                                      value.toInt(),
+                                    );
+
+                                    return SideTitleWidget(
+                                      axisSide: meta.axisSide,
+                                      child: Text(
+                                        _formatTime(dateTime, selectedTimeframe),
+                                        style: const TextStyle(fontSize: 10),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              topTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false),
+                              ),
+                              rightTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false),
+                              ),
+                            ),
+                            borderData: FlBorderData(show: true),
+                            lineTouchData: LineTouchData(
+                              enabled: true,
+                              handleBuiltInTouches: true,
+                              touchTooltipData: LineTouchTooltipData(
+                                getTooltipItems: (touchedSpots) {
+                                  return touchedSpots.map((spot) {
+                                    final spotTime =
+                                        DateTime.fromMillisecondsSinceEpoch(
+                                      spot.x.toInt(),
+                                    );
+
+                                    return LineTooltipItem(
+                                      '${spot.y.toStringAsFixed(2)} kg\n${_formatTime(spotTime, selectedTimeframe)}',
+                                      const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    );
+                                  }).toList();
+                                },
+                              ),
+                            ),
+                            lineBarsData: [
+                              LineChartBarData(
+                                spots: chartPoints,
+                                isCurved: true,
+                                gradient: LinearGradient(
+                                  colors: [Colors.blue.shade500, Colors.cyan.shade400],
+                                ),
+                                barWidth: 3,
+                                isStrokeCapRound: true,
+                                dotData: const FlDotData(show: false),
+                                belowBarData: BarAreaData(
+                                  show: true,
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.blue.withValues(alpha: 0.24),
+                                      Colors.blue.withValues(alpha: 0.04),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : const Center(
+                        child: Text(
+                          'Chưa có dữ liệu trong khung thời gian đã chọn',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
