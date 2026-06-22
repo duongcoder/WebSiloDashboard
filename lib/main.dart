@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:responsive_framework/responsive_framework.dart';
@@ -457,25 +458,46 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, Color color) {
+  Widget _buildStatCard(
+    String title,
+    String value,
+    Color color, {
+    bool compact = false,
+  }) {
     return Card(
-      color: color.withOpacity(0.1),
+      color: color.withValues(alpha: 0.1),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(compact ? 12 : 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(value, style: const TextStyle(fontSize: 18)),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: compact ? 12 : 13,
+              ),
+            ),
+            SizedBox(height: compact ? 3 : 4),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: compact ? 16 : 18),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatsSection(double maxWidth) {
+  Widget _buildStatsSection({
+    required double screenWidth,
+    required double contentWidth,
+  }) {
     final stats = <Map<String, dynamic>>[
       {'title': 'Tổng khối lượng', 'value': '1,245.32 tấn', 'color': Colors.blue},
       {'title': 'Silo hoạt động', 'value': '22/24', 'color': Colors.green},
@@ -484,37 +506,63 @@ class _DashboardPageState extends State<DashboardPage> {
       {'title': 'Lượng ăn hôm nay', 'value': '18.52 tấn', 'color': Colors.purple},
     ];
 
-    int crossAxisCount;
-    if (maxWidth >= 1500) {
-      crossAxisCount = 5;
-    } else if (maxWidth >= 1000) {
-      crossAxisCount = 3;
-    } else if (maxWidth >= 640) {
-      crossAxisCount = 2;
-    } else {
-      crossAxisCount = 1;
+    // Mobile thật: ẩn hoàn toàn Stats.
+    if (screenWidth < 600) {
+      return const SizedBox.shrink();
     }
 
-    final childAspectRatio = maxWidth < 640 ? 3.2 : 3.6;
+    final isTablet = screenWidth < 1100;
+    final horizontalPadding = isTablet ? 6.0 : 10.0;
+    final gap = 8.0;
+    final rawCardWidth = isTablet
+        ? 152.0
+        : ((contentWidth - (horizontalPadding * 2) - (gap * (stats.length - 1))) /
+                stats.length)
+            .clamp(158.0, 210.0);
+    final cardWidth = rawCardWidth.toDouble();
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: stats.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: childAspectRatio,
-      ),
-      itemBuilder: (context, index) {
+    final row = Row(
+      children: List<Widget>.generate(stats.length, (index) {
         final item = stats[index];
-        return _buildStatCard(
-          item['title'] as String,
-          item['value'] as String,
-          item['color'] as Color,
+        return Padding(
+          padding: EdgeInsets.only(right: index == stats.length - 1 ? 0 : gap),
+          child: SizedBox(
+            width: cardWidth,
+            child: _buildStatCard(
+              item['title'] as String,
+              item['value'] as String,
+              item['color'] as Color,
+              compact: isTablet,
+            ),
+          ),
         );
-      },
+      }),
+    );
+
+    return SizedBox(
+      height: isTablet ? 94 : 100,
+      child: ScrollConfiguration(
+        behavior: const MaterialScrollBehavior().copyWith(
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.trackpad,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.unknown,
+          },
+        ),
+        child: Scrollbar(
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              child: row,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -976,6 +1024,8 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildCompactDashboard(double maxWidth) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final showStats = screenWidth >= 600;
     final horizontalPadding = maxWidth < 640 ? 10.0 : 16.0;
 
     return Scaffold(
@@ -1000,8 +1050,12 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildStatsSection(maxWidth),
-                const SizedBox(height: 16),
+                if (showStats)
+                  _buildStatsSection(
+                    screenWidth: screenWidth,
+                    contentWidth: maxWidth,
+                  ),
+                if (showStats) const SizedBox(height: 16),
                 _buildModulesAndChartSection(maxWidth),
                 const SizedBox(height: 16),
                 _buildPlanAndWarningSection(),
@@ -1113,7 +1167,14 @@ class _DashboardPageState extends State<DashboardPage> {
                         children: [
                           Padding(
                             padding: const EdgeInsets.only(bottom: 16),
-                            child: _buildStatsSection(MediaQuery.of(context).size.width),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                return _buildStatsSection(
+                                  screenWidth: screenWidth,
+                                  contentWidth: constraints.maxWidth,
+                                );
+                              },
+                            ),
                           ),
                           Expanded(
                             child: Row(
