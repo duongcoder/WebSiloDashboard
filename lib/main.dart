@@ -593,15 +593,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildModulesAndChartSection(double maxWidth) {
     int crossAxisCount;
-    if (maxWidth >= 1600) {
+    if (maxWidth >= 1500) {
       crossAxisCount = 4;
-    } else if (maxWidth >= 1300) {
+    } else if (maxWidth >= 1050) {
       crossAxisCount = 3;
-    } else if (maxWidth >= 900) {
+    } else if (maxWidth >= 680) {
       crossAxisCount = 2;
     } else {
       crossAxisCount = 1;
     }
+
+    final moduleCardAspectRatio = switch (crossAxisCount) {
+      1 => 1.06,
+      2 => 1.0,
+      3 => 0.93,
+      _ => 0.88,
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -612,8 +619,8 @@ class _DashboardPageState extends State<DashboardPage> {
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          // Tăng chiều cao cell để SiloModule lớn hơn
-          childAspectRatio: 1.18,
+          // Giữ card Silo đủ cao để nội dung không bị dồn khi responsive desktop.
+          childAspectRatio: moduleCardAspectRatio,
           children: _silos.asMap().entries.map((entry) {
             final idx = entry.key;
             final silo = entry.value;
@@ -1007,6 +1014,9 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final rightPanelWidth = (screenWidth * 0.30).clamp(420.0, 560.0);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
       body: SafeArea(
@@ -1111,14 +1121,18 @@ class _DashboardPageState extends State<DashboardPage> {
                               children: [
                                 Expanded(
                                   child: SingleChildScrollView(
-                                    child: _buildModulesAndChartSection(
-                                      MediaQuery.of(context).size.width,
+                                    child: LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        return _buildModulesAndChartSection(
+                                          constraints.maxWidth,
+                                        );
+                                      },
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 12),
                                 SizedBox(
-                                  width: 620,
+                                  width: rightPanelWidth,
                                   child: SingleChildScrollView(
                                     child: _buildPlanAndWarningSection(),
                                   ),

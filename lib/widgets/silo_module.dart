@@ -135,66 +135,29 @@ class _SiloModuleState extends State<SiloModule> {
                 children: [
                   Center(child: gauge),
                   SizedBox(height: isMobile ? 10 : 12),
-                  Text(
-                    'Số cân',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: labelFontSize,
-                    ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  SizedBox(height: isMobile ? 6 : 8),
-                  Text(
-                    weightValue,
-                    style: TextStyle(
-                      fontSize: valueFontSize,
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: false,
-                    maxLines: 1,
+                  _WeightInfo(
+                    labelFontSize: labelFontSize,
+                    valueFontSize: valueFontSize,
+                    weightValue: weightValue,
+                    isMobile: true,
                   ),
                 ],
               )
             : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Flexible(
                     fit: FlexFit.loose,
                     child: Center(child: gauge),
                   ),
-                  SizedBox(width: moduleWidth * 0.04),
+                  SizedBox(width: moduleWidth * 0.05),
                   Flexible(
                     fit: FlexFit.loose,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'Số cân',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: labelFontSize,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        SizedBox(height: isMobile ? 6 : 8),
-                        Text(
-                          weightValue,
-                          style: TextStyle(
-                            fontSize: valueFontSize,
-                            color: Colors.black87,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                          maxLines: 1,
-                        ),
-                      ],
+                    child: _WeightInfo(
+                      labelFontSize: labelFontSize,
+                      valueFontSize: (valueFontSize + 2).clamp(14.0, 26.0),
+                      weightValue: weightValue,
+                      isMobile: false,
                     ),
                   ),
                 ],
@@ -263,6 +226,52 @@ class _SiloModuleState extends State<SiloModule> {
           ),
         );
       },
+    );
+  }
+}
+
+class _WeightInfo extends StatelessWidget {
+  final double labelFontSize;
+  final double valueFontSize;
+  final String weightValue;
+  final bool isMobile;
+
+  const _WeightInfo({
+    required this.labelFontSize,
+    required this.valueFontSize,
+    required this.weightValue,
+    required this.isMobile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Số cân',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: labelFontSize,
+          ),
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+        SizedBox(height: isMobile ? 6 : 8),
+        Text(
+          weightValue,
+          style: TextStyle(
+            fontSize: valueFontSize,
+            color: Colors.black87,
+            fontWeight: FontWeight.w600,
+          ),
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
+          softWrap: false,
+          maxLines: 1,
+        ),
+      ],
     );
   }
 }
