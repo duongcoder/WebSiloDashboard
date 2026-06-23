@@ -80,6 +80,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<ColData> _colData = [];
   List<SiloHistoryModel> _siloHistory = [];
   int _lastProcessedId = -1;
+  double _noiseThresholdKg = 5.0;
 
   List<Map<String, String>> _pumpPlanRows = [];
   Timer? _pumpTimer;
@@ -403,6 +404,61 @@ class _DashboardPageState extends State<DashboardPage> {
     } catch (e) {
       debugPrint('Error loading ColData: $e');
     }
+  }
+
+  List<SiloHistoryModel> filterSiloHistory(List<SiloHistoryModel> rawData) {
+    if (rawData.isEmpty) return const <SiloHistoryModel>[];
+
+    final sorted = [...rawData]..sort((a, b) => a.id.compareTo(b.id));
+
+    // 1) Loại bỏ điểm đứng yên theo yêu cầu (weight_now == weight_pre).
+    final movingOnly = sorted
+        .where((item) => item.weightNow != item.weightPre)
+        .toList();
+
+    if (movingOnly.length <= 2) return movingOnly;
+
+    int direction(double from, double to) {
+      final delta = to - from;
+      if (delta.abs() <= _noiseThresholdKg) return 0;
+      if (delta > 0) return 1;
+      if (delta < 0) return -1;
+      return 0;
+    }
+
+    final optimized = <SiloHistoryModel>[movingOnly.first];
+    var previous = movingOnly.first;
+    var currentDirection = 0;
+
+    for (var i = 1; i < movingOnly.length; i++) {
+      final current = movingOnly[i];
+      final nextDirection = direction(previous.weightNow, current.weightNow);
+
+      if (nextDirection == 0) {
+        // Bỏ qua dao động nhiễu nhỏ trong ngưỡng do người dùng chọn.
+        previous = current;
+        continue;
+      }
+
+      if (currentDirection == 0) {
+        currentDirection = nextDirection;
+      } else if (nextDirection != currentDirection) {
+        // 2) Khi đổi hướng, giữ lại điểm kết thúc của xu hướng trước đó.
+        if (optimized.last.id != previous.id) {
+          optimized.add(previous);
+        }
+        currentDirection = nextDirection;
+      }
+
+      previous = current;
+    }
+
+    // Luôn giữ điểm kết thúc xu hướng cuối cùng.
+    if (optimized.last.id != movingOnly.last.id) {
+      optimized.add(movingOnly.last);
+    }
+
+    return optimized;
   }
 
   List<Map<String, String>> _getWarningRowsFromSilos({
@@ -1088,6 +1144,36 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                Text(
+                  'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blue.shade900,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Slider(
+                    value: _noiseThresholdKg,
+                    min: 1,
+                    max: 100,
+                    divisions: 99,
+                    label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                    onChanged: (value) {
+                      setState(() {
+                        _noiseThresholdKg = value;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Padding(
@@ -1170,6 +1256,109 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildSiloHistoryCard() {
+    final filtered = filterSiloHistory(_siloHistory);
+    final rows = [...filtered]..sort((a, b) => b.id.compareTo(a.id));
+    final visibleRows = rows.length > 30 ? rows.take(30).toList() : rows;
+
+    String formatKg(double value) {
+      return '${value.toStringAsFixed(1)} kg';
+    }
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Row(
+              children: [
+                const Text(
+                  'Lịch sử khối lượng Silo',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: Text(
+                    'Tổng: ${visibleRows.length}/${rows.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.resolveWith(
+                  (states) => Colors.blue.shade50,
+                ),
+                dataRowMinHeight: 44,
+                columnSpacing: 22,
+                columns: const [
+                  DataColumn(label: Text('STT')),
+                  DataColumn(label: Text('ID Cân')),
+                  DataColumn(label: Text('Số cân trước')),
+                  DataColumn(label: Text('Số cân hiện tại')),
+                  DataColumn(label: Text('Thời gian')),
+                  DataColumn(label: Text('Chi tiết')),
+                ],
+                rows: visibleRows.isNotEmpty
+                    ? visibleRows.map((item) {
+                        return DataRow(
+                          cells: [
+                            DataCell(Text('${item.id}')),
+                            DataCell(Text('${item.idScale}')),
+                            DataCell(Text(formatKg(item.weightPre))),
+                            DataCell(Text(formatKg(item.weightNow))),
+                            DataCell(Text(item.formattedTime)),
+                            DataCell(
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 260),
+                                child: Text(
+                                  item.des,
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 2,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList()
+                    : const [
+                        DataRow(
+                          cells: [
+                            DataCell(Text('-')),
+                            DataCell(Text('-')),
+                            DataCell(Text('-')),
+                            DataCell(Text('-')),
+                            DataCell(Text('Chưa có dữ liệu')),
+                            DataCell(Text('-')),
+                          ],
+                        ),
+                      ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPlanAndWarningSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1186,11 +1375,11 @@ class _DashboardPageState extends State<DashboardPage> {
         Container(
           padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
           child: const Text(
-            'Kế hoạch Xả',
+            'Lịch sử khối lượng Silo',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
         ),
-        _buildDumpPlanCard(),
+        _buildSiloHistoryCard(),
         _buildWarningTableCard(
           rows: _getWarningRowsFromSilos(
             silos: _silos,

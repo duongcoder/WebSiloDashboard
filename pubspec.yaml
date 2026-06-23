@@ -33,6 +33,7 @@ dependencies:
   fl_chart: ^0.68.0
   signalr_core: ^1.1.0
   excel: ^4.0.6
+  intl: ^0.20.2
 
 
   # The following adds the Cupertino Icons font to your application.

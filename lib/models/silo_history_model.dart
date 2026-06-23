@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 class SiloHistoryModel {
   final int id;
   final int idScale;
@@ -92,6 +94,11 @@ class SiloHistoryModel {
     final minute = local.minute.toString().padLeft(2, '0');
     final second = local.second.toString().padLeft(2, '0');
     return '$hour:$minute:$second';
+  }
+
+  /// Trả về thời gian hiển thị dạng HH:mm:ss - dd/MM/yyyy.
+  String get formattedTime {
+    return DateFormat('HH:mm:ss - dd/MM/yyyy').format(time.toLocal());
   }
 
   static List<SiloHistoryModel> parseListFromResponse(

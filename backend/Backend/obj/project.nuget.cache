@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "4X+9K2zc9xU=",
+  "dgSpecHash": "Qejwk0kXMj0=",
   "success": true,
-  "projectFilePath": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\Backend.csproj",
+  "projectFilePath": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\Backend.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\tranm\\.nuget\\packages\\azure.core\\1.35.0\\azure.core.1.35.0.nupkg.sha512",
     "C:\\Users\\tranm\\.nuget\\packages\\azure.identity\\1.10.3\\azure.identity.1.10.3.nupkg.sha512",
@@ -81,9 +81,9 @@
       "code": "NU1902",
       "level": "Warning",
       "message": "Package 'RestSharp' 110.2.0 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-4rr6-2v9v-wcpc",
-      "projectPath": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\Backend.csproj",
+      "projectPath": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\Backend.csproj",
       "warningLevel": 1,
-      "filePath": "D:\\WebSilo\\silo_dashboard\\backend\\backend\\Backend.csproj",
+      "filePath": "D:\\WebSilo\\silo_dashboard\\backend\\Backend\\Backend.csproj",
       "libraryId": "RestSharp",
       "targetGraphs": [
         "net8.0"
