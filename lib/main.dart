@@ -2061,14 +2061,13 @@ class SiloVolumeChart extends StatelessWidget {
     final maxX = (maxXRaw - minXRaw).abs() < 1
       ? minXRaw + const Duration(minutes: 1).inMilliseconds
       : maxXRaw;
-    final minWeight = hasData
-      ? chartPoints.map((spot) => spot.y).reduce((a, b) => a < b ? a : b)
-      : 0.0;
     final maxWeight = hasData
       ? chartPoints.map((spot) => spot.y).reduce((a, b) => a > b ? a : b)
       : 50000.0;
-    final minY = hasData ? minWeight * 0.9 : 0.0;
-    final maxY = hasData ? maxWeight * 1.1 : 50000.0;
+    const minY = 0.0;
+    final maxY = hasData
+      ? (maxWeight * 1.15).clamp(1.0, double.infinity)
+      : 50000.0;
     final xInterval = hasData
       ? ((maxX - minX) / 4).clamp(1.0, double.infinity)
       : 1.0;
@@ -2141,10 +2140,10 @@ class SiloVolumeChart extends StatelessWidget {
                           child: LineChart(
                             LineChartData(
                               clipData: FlClipData.all(),
-                              baselineY: minY,
+                              baselineY: 0,
                               minX: minX,
                               maxX: maxX,
-                              minY: minY,
+                              minY: 0,
                               maxY: maxY,
                               gridData: FlGridData(
                                 show: true,
@@ -2212,6 +2211,8 @@ class SiloVolumeChart extends StatelessWidget {
                                 enabled: true,
                                 handleBuiltInTouches: true,
                                 touchTooltipData: LineTouchTooltipData(
+                                  fitInsideHorizontally: true,
+                                  fitInsideVertically: true,
                                   getTooltipItems: (touchedSpots) {
                                     return touchedSpots.map((spot) {
                                       final spotTime =
