@@ -34,6 +34,7 @@ dependencies:
   signalr_core: ^1.1.0
   excel: ^4.0.6
   intl: ^0.20.2
+  shared_preferences: ^2.5.3
 
 
   # The following adds the Cupertino Icons font to your application.

@@ -12,6 +12,7 @@ import '../models/silo.dart';
 class SiloModule extends StatefulWidget {
   final String id;
   final double? currentWeight;
+  final double maxWeight;
   final double level; // not used for UI (level is calculated from weight/max)
   final List<Indicator> indicators;
   final List<Controller> controllers;
@@ -21,6 +22,7 @@ class SiloModule extends StatefulWidget {
     super.key,
     required this.id,
     required this.currentWeight,
+    required this.maxWeight,
     required this.level,
     required this.indicators,
     required this.controllers,
@@ -32,11 +34,7 @@ class SiloModule extends StatefulWidget {
 }
 
 class _SiloModuleState extends State<SiloModule> {
-  final TextEditingController _maxWeightController =
-      TextEditingController(text: '100');
-
   double _currentWeight = 0;
-  double _maxWeight = 100;
   bool _isFetchingScale = false;
 
   late final Timer _timer;
@@ -80,7 +78,6 @@ class _SiloModuleState extends State<SiloModule> {
   @override
   void dispose() {
     _timer.cancel();
-    _maxWeightController.dispose();
     super.dispose();
   }
 
@@ -123,7 +120,7 @@ class _SiloModuleState extends State<SiloModule> {
             .clamp(13.0, 18.0);
 
         // Level calculation from user input (Cân Max)
-        final maxWeight = (_maxWeight > 0) ? _maxWeight : 1;
+        final maxWeight = (widget.maxWeight > 0) ? widget.maxWeight : 1;
         final currentForLevel = _currentWeight.clamp(0.0, maxWeight);
         final levelPercent = ((currentForLevel / maxWeight) * 100.0).clamp(0.0, 100.0);
         final level01 = (levelPercent / 100.0).clamp(0.0, 1.0);
@@ -197,30 +194,16 @@ class _SiloModuleState extends State<SiloModule> {
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
-                      SizedBox(height: isMobile ? 10 : 12),
-
-                      Align(
-                        alignment: Alignment.center,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: isMobile ? 260 : 320,
-                          ),
-                          child: TextField(
-                            controller: _maxWeightController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Cân Max (kg)',
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (v) {
-                              final parsed = double.tryParse(v.replaceAll(',', '.'));
-                              if (parsed == null) return;
-                              setState(() => _maxWeight = parsed);
-                            },
-                          ),
+                      SizedBox(height: 6),
+                      Text(
+                        'Cân Max: ${widget.maxWeight.toStringAsFixed(1)} kg',
+                        style: TextStyle(
+                          fontSize: isMobile ? 12 : 13,
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
                         ),
+                        textAlign: TextAlign.center,
                       ),
-
                       SizedBox(height: 6),
                       content,
                     ],

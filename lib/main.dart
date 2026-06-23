@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signalr_core/signalr_core.dart';
 
 import 'config/app_config.dart';
@@ -55,6 +56,8 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const int _settingsTabIndex = 7;
+  static const double _defaultSiloMaxWeight = 100.0;
   static const Map<String, Duration> _timeframeDurations = {
     '1ph': Duration(minutes: 1),
     '5ph': Duration(minutes: 5),
@@ -84,6 +87,11 @@ class _DashboardPageState extends State<DashboardPage> {
   List<SiloHistoryModel> _siloHistory = [];
   int _lastProcessedId = -1;
   double _noiseThresholdKg = 5.0;
+  final Map<int, double> _siloMaxConfig = <int, double>{};
+  int? _selectedSettingsSiloId;
+  String? _settingsMaxWeightError;
+  final TextEditingController _settingsMaxWeightController =
+      TextEditingController(text: '100');
 
   List<Map<String, String>> _pumpPlanRows = [];
   Timer? _pumpTimer;
@@ -98,9 +106,7 @@ class _DashboardPageState extends State<DashboardPage> {
       pollingInterval: const Duration(seconds: 5),
     );
     _initSignalR();
-    _loadInitialData().whenComplete(() {
-      _startSiloHistoryStream();
-    });
+    _initializeDashboard();
 
     _pumpTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _fetchPumpPlan();
@@ -121,8 +127,16 @@ class _DashboardPageState extends State<DashboardPage> {
     _statsScrollController.dispose();
     _pumpPlanTableScrollController.dispose();
     _statisticsTableScrollController.dispose();
+    _settingsMaxWeightController.dispose();
     hubConnection.stop();
     super.dispose();
+  }
+
+  Future<void> _initializeDashboard() async {
+    await _loadInitialData();
+    if (!mounted) return;
+    await _startSiloHistoryStream();
+    await _prefillSettingsForm();
   }
 
   Future<void> _fetchPumpPlan() async {
@@ -185,6 +199,121 @@ class _DashboardPageState extends State<DashboardPage> {
     if (value is int) return value;
     if (value is String) return int.tryParse(value) ?? -1;
     return -1;
+  }
+
+  Future<void> saveSiloConfig(int siloId, double maxWeight) async {
+    if (siloId <= 0 || maxWeight < 0) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('silo_config_max_$siloId', maxWeight);
+
+    if (!mounted) return;
+    setState(() {
+      _siloMaxConfig[siloId] = maxWeight;
+    });
+  }
+
+  Future<double> loadSiloConfig(int siloId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble('silo_config_max_$siloId') ?? _defaultSiloMaxWeight;
+  }
+
+  int _extractSiloId(String siloIdText, {int? fallback}) {
+    final direct = int.tryParse(siloIdText.trim());
+    if (direct != null && direct > 0) return direct;
+
+    final extracted = RegExp(r'\d+').firstMatch(siloIdText)?.group(0);
+    final parsed = int.tryParse(extracted ?? '');
+    if (parsed != null && parsed > 0) return parsed;
+
+    return fallback ?? 1;
+  }
+
+  Future<void> _loadAllSiloConfigs(List<Silo> silos) async {
+    final Map<int, double> loaded = <int, double>{};
+    final List<int> availableIds = <int>[];
+
+    for (var i = 0; i < silos.length; i++) {
+      final silo = silos[i];
+      final siloId = _extractSiloId(silo.id, fallback: i + 1);
+      if (!availableIds.contains(siloId)) {
+        availableIds.add(siloId);
+      }
+      loaded[siloId] = await loadSiloConfig(siloId);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _siloMaxConfig
+        ..clear()
+        ..addAll(loaded);
+
+      if (availableIds.isEmpty) {
+        _selectedSettingsSiloId = null;
+        _settingsMaxWeightController.text = '';
+        _settingsMaxWeightError = null;
+        return;
+      }
+
+      final selected = _selectedSettingsSiloId != null &&
+              availableIds.contains(_selectedSettingsSiloId)
+          ? _selectedSettingsSiloId!
+          : availableIds.first;
+
+      _selectedSettingsSiloId = selected;
+      final maxWeight = loaded[selected] ?? _defaultSiloMaxWeight;
+      _settingsMaxWeightController.text = maxWeight.toStringAsFixed(1);
+      _settingsMaxWeightError = _validateMaxWeight(_settingsMaxWeightController.text);
+    });
+  }
+
+  double _getSiloMaxWeight(int siloId) {
+    return _siloMaxConfig[siloId] ?? _defaultSiloMaxWeight;
+  }
+
+  List<int> _getSettingsSiloIds() {
+    final ids = <int>[];
+    for (var i = 0; i < _silos.length; i++) {
+      final id = _extractSiloId(_silos[i].id, fallback: i + 1);
+      if (!ids.contains(id)) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }
+
+  String? _validateMaxWeight(String input) {
+    final normalized = input.trim().replaceAll(',', '.');
+    if (normalized.isEmpty) return 'Vui lòng nhập Cân Max';
+
+    final parsed = double.tryParse(normalized);
+    if (parsed == null) return 'Giá trị Cân Max không hợp lệ';
+    if (parsed < 0) return 'Cân Max phải >= 0 kg';
+    return null;
+  }
+
+  Future<void> _prefillSettingsForm() async {
+    final ids = _getSettingsSiloIds();
+    if (ids.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _selectedSettingsSiloId = null;
+        _settingsMaxWeightController.text = '';
+        _settingsMaxWeightError = null;
+      });
+      return;
+    }
+
+    final siloId = (_selectedSettingsSiloId != null && ids.contains(_selectedSettingsSiloId))
+        ? _selectedSettingsSiloId!
+        : ids.first;
+    final maxWeight = await loadSiloConfig(siloId);
+    if (!mounted) return;
+    setState(() {
+      _selectedSettingsSiloId = siloId;
+      _settingsMaxWeightController.text = maxWeight.toStringAsFixed(1);
+      _settingsMaxWeightError = _validateMaxWeight(_settingsMaxWeightController.text);
+    });
   }
 
   String _formatPumpPlanTime(dynamic value) {
@@ -351,6 +480,10 @@ class _DashboardPageState extends State<DashboardPage> {
           _silos = mapped;
         }
       });
+
+      if (_silos.isNotEmpty) {
+        await _loadAllSiloConfigs(_silos);
+      }
     } catch (e) {
       debugPrint('Error loading scales: $e');
     }
@@ -363,6 +496,8 @@ class _DashboardPageState extends State<DashboardPage> {
       setState(() {
         _silos = silos;
       });
+
+      await _loadAllSiloConfigs(silos);
     } catch (e) {
       debugPrint('Error loading silos: $e');
     }
@@ -953,6 +1088,7 @@ class _DashboardPageState extends State<DashboardPage> {
           children: _silos.asMap().entries.map((entry) {
             final idx = entry.key;
             final silo = entry.value;
+            final siloId = _extractSiloId(silo.id, fallback: idx + 1);
 
             final indicatorsForSilo = _indicators.isNotEmpty
                 ? <Indicator>[_indicators[idx % _indicators.length]]
@@ -965,6 +1101,7 @@ class _DashboardPageState extends State<DashboardPage> {
             return SiloModule(
               id: silo.id,
               currentWeight: _currentWeight,
+              maxWeight: _getSiloMaxWeight(siloId),
               level: silo.level,
               indicators: indicatorsForSilo,
               controllers: controllersForSilo,
@@ -1502,9 +1639,145 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildSettingsConfigurationCard() {
+    final displaySiloCount = _silos.length;
+    final siloIds = _getSettingsSiloIds();
+    final selectedSiloId = _selectedSettingsSiloId;
+    final selectedValue =
+        (selectedSiloId != null && siloIds.contains(selectedSiloId))
+        ? selectedSiloId
+        : null;
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Cài đặt Cân Max',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                ),
+                _buildInfoBadge('Silo hiện có: $displaySiloCount'),
+              ],
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<int>(
+              initialValue: selectedValue,
+              items: siloIds
+                  .map(
+                    (id) => DropdownMenuItem<int>(
+                      value: id,
+                      child: Text('Silo $id'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: siloIds.isEmpty
+                  ? null
+                  : (value) async {
+                      if (value == null) return;
+
+                      setState(() {
+                        _selectedSettingsSiloId = value;
+                      });
+
+                      final loadedMax = await loadSiloConfig(value);
+                      if (!mounted) return;
+
+                      setState(() {
+                        _settingsMaxWeightController.text = loadedMax.toStringAsFixed(1);
+                        _settingsMaxWeightError = _validateMaxWeight(
+                          _settingsMaxWeightController.text,
+                        );
+                      });
+                    },
+              decoration: const InputDecoration(
+                labelText: 'Silo',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _settingsMaxWeightController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Cân Max (kg)',
+                border: OutlineInputBorder(),
+                errorText: _settingsMaxWeightError,
+              ),
+              onChanged: (value) async {
+                final validationError = _validateMaxWeight(value);
+                if (mounted) {
+                  setState(() {
+                    _settingsMaxWeightError = validationError;
+                  });
+                }
+
+                final siloId = _selectedSettingsSiloId;
+                final maxWeight = double.tryParse(value.trim().replaceAll(',', '.'));
+                if (validationError != null || siloId == null || maxWeight == null) return;
+
+                await saveSiloConfig(siloId, maxWeight);
+              },
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final siloId = _selectedSettingsSiloId;
+                  final maxWeight = double.tryParse(
+                    _settingsMaxWeightController.text.trim().replaceAll(',', '.'),
+                  );
+                  final validationError = _validateMaxWeight(
+                    _settingsMaxWeightController.text,
+                  );
+
+                  if (mounted) {
+                    setState(() {
+                      _settingsMaxWeightError = validationError;
+                    });
+                  }
+
+                  if (siloId == null || maxWeight == null || validationError != null) {
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Vui lòng nhập đúng Silo và Cân Max')),
+                    );
+                    return;
+                  }
+
+                  await saveSiloConfig(siloId, maxWeight);
+                  if (!mounted) return;
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('Đã lưu cấu hình Silo $siloId: ${maxWeight.toStringAsFixed(1)} kg')),
+                  );
+                },
+                icon: const Icon(Icons.save),
+                label: const Text('Lưu cấu hình'),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Cấu hình được lưu bằng SharedPreferences và tự động áp dụng khi re-build/responsive.',
+              style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
+    final showSettings = _selectedIndex == _settingsTabIndex;
     final horizontalPadding = maxWidth < 640 ? 10.0 : 16.0;
 
     return Scaffold(
@@ -1529,15 +1802,19 @@ class _DashboardPageState extends State<DashboardPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showStats)
+                if (showStats && !showSettings)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
                   ),
-                if (showStats) const SizedBox(height: 16),
-                _buildModulesAndChartSection(maxWidth),
-                const SizedBox(height: 16),
-                _buildPlanAndWarningSection(),
+                if (showStats && !showSettings) const SizedBox(height: 16),
+                if (showSettings)
+                  _buildSettingsConfigurationCard()
+                else ...[
+                  _buildModulesAndChartSection(maxWidth),
+                  const SizedBox(height: 16),
+                  _buildPlanAndWarningSection(),
+                ],
               ],
             ),
           ),
@@ -1548,6 +1825,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final showSettings = _selectedIndex == _settingsTabIndex;
     final rightPanelWidth = (screenWidth * 0.30).clamp(420.0, 560.0);
 
     return Scaffold(
@@ -1644,41 +1922,46 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                return _buildStatsSection(
-                                  screenWidth: screenWidth,
-                                  contentWidth: constraints.maxWidth,
-                                );
-                              },
+                          if (!showSettings)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  return _buildStatsSection(
+                                    screenWidth: screenWidth,
+                                    contentWidth: constraints.maxWidth,
+                                  );
+                                },
+                              ),
                             ),
-                          ),
                           Expanded(
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    child: LayoutBuilder(
-                                      builder: (context, constraints) {
-                                        return _buildModulesAndChartSection(
-                                          constraints.maxWidth,
-                                        );
-                                      },
-                                    ),
+                            child: showSettings
+                                ? SingleChildScrollView(
+                                    child: _buildSettingsConfigurationCard(),
+                                  )
+                                : Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: SingleChildScrollView(
+                                          child: LayoutBuilder(
+                                            builder: (context, constraints) {
+                                              return _buildModulesAndChartSection(
+                                                constraints.maxWidth,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      SizedBox(
+                                        width: rightPanelWidth,
+                                        child: SingleChildScrollView(
+                                          child: _buildPlanAndWarningSection(),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                SizedBox(
-                                  width: rightPanelWidth,
-                                  child: SingleChildScrollView(
-                                    child: _buildPlanAndWarningSection(),
-                                  ),
-                                ),
-                              ],
-                            ),
                           ),
                         ],
                       ),
