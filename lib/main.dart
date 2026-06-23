@@ -16,6 +16,7 @@ import 'models/silo_history_model.dart';
 import 'services/scale_service.dart';
 import 'services/excel_export_service.dart';
 import 'services/silo_api_service.dart';
+import 'services/statistics_report_helper.dart';
 import 'services/sql_service.dart';
 import 'widgets/silo_module.dart';
 
@@ -427,67 +428,22 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   List<Map<String, String>> _buildReportExportRows() {
-    final filtered = filterSiloHistory(_siloHistory)
-      ..sort((a, b) => b.id.compareTo(a.id));
-    final visibleRows = filtered.length > 10 ? filtered.take(10).toList() : filtered;
+    final compressed = generateCompressedStatisticsReport(_siloHistory);
+    final visibleRows = compressed.reversed.take(10).toList();
 
     final exportRows = <Map<String, String>>[];
 
-    for (var i = 0; i < visibleRows.length; i++) {
-      final item = visibleRows[i];
-      final previous = i < visibleRows.length - 1 ? visibleRows[i + 1] : null;
-      final detail = _buildReportDetail(item: item, previous: previous);
-
+    for (final item in visibleRows) {
       exportRows.add({
-        'time': item.formattedTime,
-        'silo': item.idScale.toString(),
-        'material': detail,
-        'qty': item.weightChange,
+        'time': item.timeRangeText,
+        'silo': item.milestone.idScale.toString(),
+        'material': item.detailText,
+        'qty': item.weightChangeText,
         'status': 'Thong ke',
       });
     }
 
     return exportRows;
-  }
-
-  String _buildReportDetail({
-    required SiloHistoryModel item,
-    required SiloHistoryModel? previous,
-  }) {
-    try {
-      final delta = item.weightNow - item.weightPre;
-      final changeKg = delta.abs().toStringAsFixed(1);
-
-      var durationText = 'không xác định';
-      if (previous != null) {
-        try {
-          final duration = item.time.difference(previous.time).abs();
-          final minutes = duration.inMinutes;
-          final seconds = duration.inSeconds % 60;
-
-          if (minutes > 0) {
-            durationText = '$minutes ph';
-          } else {
-            durationText = '$seconds giây';
-          }
-        } catch (e) {
-          debugPrint('Loi tinh khoang thoi gian bao cao: $e');
-          durationText = 'không xác định';
-        }
-      }
-
-      if (delta > 0) {
-        return 'Khối lượng tăng thêm $changeKg kg trong $durationText';
-      }
-      if (delta < 0) {
-        return 'Khối lượng giảm đi $changeKg kg trong $durationText';
-      }
-
-      return 'Khối lượng không đổi trong $durationText';
-    } catch (e) {
-      debugPrint('Loi tao noi dung Chi tiet: $e');
-      return 'Khối lượng không đổi trong không xác định';
-    }
   }
 
   String _buildReportFileName() {
@@ -1208,117 +1164,15 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildSiloHistoryCard() {
-    final filtered = filterSiloHistory(_siloHistory);
-    final rows = [...filtered]..sort((a, b) => b.id.compareTo(a.id));
-    final visibleRows = rows.length > 30 ? rows.take(30).toList() : rows;
-
-    String formatKg(double value) {
-      return '${value.toStringAsFixed(1)} kg';
-    }
-
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Row(
-              children: [
-                const Text(
-                  'Lịch sử khối lượng Silo',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.shade100),
-                  ),
-                  child: Text(
-                    'Tổng: ${visibleRows.length}/${rows.length}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue.shade900,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: DataTable(
-                headingRowColor: WidgetStateProperty.resolveWith(
-                  (states) => Colors.blue.shade50,
-                ),
-                dataRowMinHeight: 44,
-                columnSpacing: 22,
-                columns: const [
-                  DataColumn(label: Text('STT')),
-                  DataColumn(label: Text('ID Cân')),
-                  DataColumn(label: Text('Số cân trước')),
-                  DataColumn(label: Text('Số cân hiện tại')),
-                  DataColumn(label: Text('Thời gian')),
-                  DataColumn(label: Text('Chi tiết')),
-                ],
-                rows: visibleRows.isNotEmpty
-                    ? visibleRows.map((item) {
-                        return DataRow(
-                          cells: [
-                            DataCell(Text('${item.id}')),
-                            DataCell(Text('${item.idScale}')),
-                            DataCell(Text(formatKg(item.weightPre))),
-                            DataCell(Text(formatKg(item.weightNow))),
-                            DataCell(Text(item.formattedTime)),
-                            DataCell(
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 260),
-                                child: Text(
-                                  item.des,
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 2,
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      }).toList()
-                    : const [
-                        DataRow(
-                          cells: [
-                            DataCell(Text('-')),
-                            DataCell(Text('-')),
-                            DataCell(Text('-')),
-                            DataCell(Text('-')),
-                            DataCell(Text('Chưa có dữ liệu')),
-                            DataCell(Text('-')),
-                          ],
-                        ),
-                      ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildStatisticsReportCard() {
-    final filtered = filterSiloHistory(_siloHistory)
-      ..sort((a, b) => b.id.compareTo(a.id));
-    final rows = filtered.length > 10 ? filtered.take(10).toList() : filtered;
+    final rows = generateCompressedStatisticsReport(_siloHistory)
+        .reversed
+        .take(20)
+        .toList();
 
     Color changeColor(String change) {
-      if (change.startsWith('+')) return Colors.green.shade700;
-      if (change.startsWith('-')) return Colors.red.shade700;
+      if (change.startsWith('+')) return Colors.green;
+      if (change.startsWith('-')) return Colors.red;
       return Colors.black87;
     }
 
@@ -1389,31 +1243,25 @@ class _DashboardPageState extends State<DashboardPage> {
                     rows: rows.isNotEmpty
                         ? List<DataRow>.generate(rows.length, (index) {
                             final item = rows[index];
-                            final previous =
-                                index < rows.length - 1 ? rows[index + 1] : null;
-                            final detail = _buildReportDetail(
-                              item: item,
-                              previous: previous,
-                            );
 
                             final cells = <DataCell>[
-                              DataCell(Text('${item.id}')),
-                              if (!isMobile) DataCell(Text('${item.idScale}')),
+                              DataCell(Text('${index + 1}')),
+                              if (!isMobile) DataCell(Text('${item.milestone.idScale}')),
                               DataCell(
                                 Text(
-                                  item.weightChange,
+                                  item.weightChangeText,
                                   style: TextStyle(
-                                    color: changeColor(item.weightChange),
+                                    color: changeColor(item.weightChangeText),
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ),
-                              DataCell(Text(item.formattedTime)),
+                              DataCell(Text(item.timeRangeText)),
                               DataCell(
                                 SizedBox(
                                   width: isMobile ? 220 : 420,
                                   child: Text(
-                                    detail,
+                                    item.detailText,
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -1457,14 +1305,6 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         _buildPumpPlanCard(),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
-          child: const Text(
-            'Lịch sử khối lượng Silo',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-        ),
-        _buildSiloHistoryCard(),
         _buildStatisticsReportCard(),
       ],
     );
