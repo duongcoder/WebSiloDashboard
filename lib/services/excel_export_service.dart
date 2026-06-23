@@ -17,6 +17,11 @@ class ExcelExportResult {
 Future<ExcelExportResult> exportPlanRowsToExcel({
   required String filePrefix,
   required List<Map<String, String>> rows,
+  String? downloadFileName,
 }) {
-  return impl.exportPlanRowsToExcel(filePrefix: filePrefix, rows: rows);
+  return impl.exportPlanRowsToExcel(
+    filePrefix: filePrefix,
+    rows: rows,
+    downloadFileName: downloadFileName,
+  );
 }

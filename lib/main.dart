@@ -84,6 +84,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Map<String, String>> _pumpPlanRows = [];
   Timer? _pumpTimer;
+  Timer? _autoReportExportTimer;
+  DateTime? _lastReportExportAt;
+  bool _isFetchingPumpPlan = false;
 
   final List<Map<String, String>> _dumpPlanRows = [
     {
@@ -120,14 +123,19 @@ class _DashboardPageState extends State<DashboardPage> {
       _startSiloHistoryStream();
     });
 
-    _pumpTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    _pumpTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _fetchPumpPlan();
+    });
+
+    _autoReportExportTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      _maybeAutoExportReport();
     });
   }
 
   @override
   void dispose() {
     _pumpTimer?.cancel();
+    _autoReportExportTimer?.cancel();
     _historySubscription?.cancel();
     _siloApiService.dispose();
     _chartTransformController.dispose();
@@ -136,10 +144,15 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _fetchPumpPlan() async {
+    if (_isFetchingPumpPlan) return;
+    _isFetchingPumpPlan = true;
+
     try {
-      final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/Schedulers/GetSchedulers'),
-      );
+      final response = await http
+          .get(
+            Uri.parse('${AppConfig.baseUrl}/Schedulers/GetSchedulers'),
+          )
+          .timeout(const Duration(seconds: 12));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -168,6 +181,8 @@ class _DashboardPageState extends State<DashboardPage> {
       }
     } catch (e) {
       debugPrint('Error fetching pump plan: $e');
+    } finally {
+      _isFetchingPumpPlan = false;
     }
   }
 
@@ -459,6 +474,117 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return optimized;
+  }
+
+  List<Map<String, String>> _buildReportExportRows() {
+    final filtered = filterSiloHistory(_siloHistory)
+      ..sort((a, b) => b.id.compareTo(a.id));
+    final visibleRows = filtered.length > 10 ? filtered.take(10).toList() : filtered;
+
+    final exportRows = <Map<String, String>>[];
+
+    for (var i = 0; i < visibleRows.length; i++) {
+      final item = visibleRows[i];
+      final previous = i < visibleRows.length - 1 ? visibleRows[i + 1] : null;
+      final detail = _buildReportDetail(item: item, previous: previous);
+
+      exportRows.add({
+        'time': item.formattedTime,
+        'silo': item.idScale.toString(),
+        'material': detail,
+        'qty': item.weightChange,
+        'status': 'Thong ke',
+      });
+    }
+
+    return exportRows;
+  }
+
+  String _buildReportDetail({
+    required SiloHistoryModel item,
+    required SiloHistoryModel? previous,
+  }) {
+    try {
+      final delta = item.weightNow - item.weightPre;
+      final changeKg = delta.abs().toStringAsFixed(1);
+
+      var durationText = 'không xác định';
+      if (previous != null) {
+        try {
+          final duration = item.time.difference(previous.time).abs();
+          final minutes = duration.inMinutes;
+          final seconds = duration.inSeconds % 60;
+
+          if (minutes > 0) {
+            durationText = '$minutes ph';
+          } else {
+            durationText = '$seconds giây';
+          }
+        } catch (e) {
+          debugPrint('Loi tinh khoang thoi gian bao cao: $e');
+          durationText = 'không xác định';
+        }
+      }
+
+      if (delta > 0) {
+        return 'Khối lượng tăng thêm $changeKg kg trong $durationText';
+      }
+      if (delta < 0) {
+        return 'Khối lượng giảm đi $changeKg kg trong $durationText';
+      }
+
+      return 'Khối lượng không đổi trong $durationText';
+    } catch (e) {
+      debugPrint('Loi tao noi dung Chi tiet: $e');
+      return 'Khối lượng không đổi trong không xác định';
+    }
+  }
+
+  String _buildReportFileName() {
+    final now = DateTime.now();
+    final day = now.day.toString().padLeft(2, '0');
+    final month = now.month.toString().padLeft(2, '0');
+    final year = now.year.toString();
+    return 'ThongKe_${day}_${month}_$year.xlsx';
+  }
+
+  Future<void> _exportStatisticsReport({required bool isAuto}) async {
+    final rows = _buildReportExportRows();
+
+    if (rows.isEmpty) return;
+
+    final now = DateTime.now();
+    final day = now.day.toString().padLeft(2, '0');
+    final month = now.month.toString().padLeft(2, '0');
+    final year = (now.year % 100).toString().padLeft(2, '0');
+    final filePrefix = 'ThongKe_$day-$month-$year';
+    final downloadFileName = _buildReportFileName();
+
+    final result = await exportPlanRowsToExcel(
+      filePrefix: filePrefix,
+      rows: rows,
+      downloadFileName: downloadFileName,
+    );
+
+    if (result.success) {
+      _lastReportExportAt = DateTime.now();
+    }
+
+    if (!mounted) return;
+    if (!isAuto) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message)),
+      );
+    }
+  }
+
+  Future<void> _maybeAutoExportReport() async {
+    final now = DateTime.now();
+    final last = _lastReportExportAt;
+
+    if (last == null || now.difference(last) >= const Duration(hours: 24)) {
+      await _exportStatisticsReport(isAuto: true);
+    }
   }
 
   List<Map<String, String>> _getWarningRowsFromSilos({
@@ -1359,6 +1485,139 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildStatisticsReportCard() {
+    final filtered = filterSiloHistory(_siloHistory)
+      ..sort((a, b) => b.id.compareTo(a.id));
+    final rows = filtered.length > 10 ? filtered.take(10).toList() : filtered;
+
+    Color changeColor(String change) {
+      if (change.startsWith('+')) return Colors.green.shade700;
+      if (change.startsWith('-')) return Colors.red.shade700;
+      return Colors.black87;
+    }
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 600;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Báo cáo thống kê',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await _exportStatisticsReport(isAuto: false);
+                      },
+                      icon: const Icon(Icons.table_view),
+                      label: const Text('Xuất excel'),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade100),
+                      ),
+                      child: Text(
+                        'Hiển thị: ${rows.length}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.resolveWith(
+                      (states) => Colors.blue.shade50,
+                    ),
+                    dataRowMinHeight: 44,
+                    columnSpacing: isMobile ? 14 : 22,
+                    columns: [
+                      const DataColumn(label: Text('STT')),
+                      if (!isMobile) const DataColumn(label: Text('ID Cân')),
+                      const DataColumn(label: Text('Số cân')),
+                      const DataColumn(label: Text('Thời gian')),
+                      const DataColumn(label: Text('Chi tiết')),
+                    ],
+                    rows: rows.isNotEmpty
+                        ? List<DataRow>.generate(rows.length, (index) {
+                            final item = rows[index];
+                            final previous =
+                                index < rows.length - 1 ? rows[index + 1] : null;
+                            final detail = _buildReportDetail(
+                              item: item,
+                              previous: previous,
+                            );
+
+                            final cells = <DataCell>[
+                              DataCell(Text('${item.id}')),
+                              if (!isMobile) DataCell(Text('${item.idScale}')),
+                              DataCell(
+                                Text(
+                                  item.weightChange,
+                                  style: TextStyle(
+                                    color: changeColor(item.weightChange),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              DataCell(Text(item.formattedTime)),
+                              DataCell(
+                                SizedBox(
+                                  width: isMobile ? 220 : 420,
+                                  child: Text(
+                                    detail,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ];
+
+                            return DataRow(cells: cells);
+                          })
+                        : [
+                            DataRow(
+                              cells: [
+                                const DataCell(Text('-')),
+                                if (!isMobile) const DataCell(Text('-')),
+                                const DataCell(Text('0 kg')),
+                                const DataCell(Text('Chưa có dữ liệu')),
+                                const DataCell(Text('-')),
+                              ],
+                            ),
+                          ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildPlanAndWarningSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1380,12 +1639,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ),
         _buildSiloHistoryCard(),
-        _buildWarningTableCard(
-          rows: _getWarningRowsFromSilos(
-            silos: _silos,
-            nowTimeLabel: 'Ngay hiện tại',
-          ),
-        ),
+        _buildStatisticsReportCard(),
       ],
     );
   }

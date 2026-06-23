@@ -18,6 +18,7 @@ String _tableLabel(String filePrefix) {
 Future<ExcelExportResult> exportPlanRowsToExcel({
   required String filePrefix,
   required List<Map<String, String>> rows,
+  String? downloadFileName,
 }) async {
   try {
     final now = DateTime.now();
@@ -65,8 +66,12 @@ Future<ExcelExportResult> exportPlanRowsToExcel({
       await exportsDir.create(recursive: true);
     }
 
-    final filePath =
-      '${exportsDir.path}${Platform.pathSeparator}${timeLabel}_${dateLabel}_$tableLabel.xlsx';
+    final defaultFileName = '${timeLabel}_${dateLabel}_$tableLabel.xlsx';
+    final fileName =
+      (downloadFileName != null && downloadFileName.trim().isNotEmpty)
+      ? downloadFileName.trim()
+      : defaultFileName;
+    final filePath = '${exportsDir.path}${Platform.pathSeparator}$fileName';
 
     final file = File(filePath);
     await file.writeAsBytes(encoded, flush: true);

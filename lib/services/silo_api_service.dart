@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../models/silo_history_model.dart';
 
 class SiloApiService {
-  static String get historyUrl => '${AppConfig.baseUrl}/Scales/GetHistory';
+  static const String _directHistoryUrl =
+      'http://14.232.245.56:8089/api/Scales/GetHistory';
 
   final Duration pollingInterval;
   final http.Client _httpClient;
@@ -15,6 +17,7 @@ class SiloApiService {
 
   Timer? _pollTimer;
   List<SiloHistoryModel> _latestHistory = const [];
+  bool _isFetching = false;
 
   SiloApiService({
     this.pollingInterval = const Duration(seconds: 5),
@@ -36,29 +39,58 @@ class SiloApiService {
     int sync = -1,
     int id = -1,
   }) async {
-    final uri = Uri.parse(historyUrl).replace(
-      queryParameters: {
-        'sync': '$sync',
-        'Id': '$id',
-      },
-    );
+    final endpointCandidates = _buildHistoryEndpoints();
 
-    final response = await _httpClient
-        .get(uri)
-        .timeout(const Duration(seconds: 10));
+    Object? lastError;
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to load silo history: ${response.statusCode}');
+    for (final endpoint in endpointCandidates) {
+      try {
+        final uri = Uri.parse(endpoint).replace(
+          queryParameters: {
+            'sync': '$sync',
+            'Id': '$id',
+          },
+        );
+
+        final response = await _httpClient
+            .get(uri)
+            .timeout(const Duration(seconds: 12));
+
+        if (response.statusCode != 200) {
+          lastError = Exception(
+            'Failed to load silo history from $endpoint: ${response.statusCode}',
+          );
+          continue;
+        }
+
+        final decoded = jsonDecode(response.body);
+        final list = SiloHistoryModel.parseListFromResponse(
+          decoded,
+          defaultId: id,
+        )..sort((a, b) => a.recordTime.compareTo(b.recordTime));
+
+        _latestHistory = list;
+        return list;
+      } catch (error) {
+        lastError = error;
+      }
     }
 
-    final decoded = jsonDecode(response.body);
-    final list = SiloHistoryModel.parseListFromResponse(
-      decoded,
-      defaultId: id,
-    )..sort((a, b) => a.recordTime.compareTo(b.recordTime));
+    throw Exception('History polling failed on all endpoints: $lastError');
+  }
 
-    _latestHistory = list;
-    return list;
+  List<String> _buildHistoryEndpoints() {
+    final proxyEndpoint = '${AppConfig.baseUrl}/Scales/GetHistory';
+
+    // Web luôn đi qua backend proxy để tránh CORS từ upstream 14.232.*
+    if (kIsWeb) {
+      return <String>[proxyEndpoint];
+    }
+
+    return <String>[
+      _directHistoryUrl,
+      proxyEndpoint,
+    ];
   }
 
   List<SiloHistoryModel> filterByTimeframe({
@@ -98,6 +130,9 @@ class SiloApiService {
   }
 
   Future<void> _emitLatest({required int sync, required int id}) async {
+    if (_isFetching) return;
+    _isFetching = true;
+
     try {
       final list = await fetchHistory(sync: sync, id: id);
       if (!_historyController.isClosed) {
@@ -107,6 +142,8 @@ class SiloApiService {
       if (!_historyController.isClosed) {
         _historyController.addError(error);
       }
+    } finally {
+      _isFetching = false;
     }
   }
 

@@ -101,6 +101,34 @@ class SiloHistoryModel {
     return DateFormat('HH:mm:ss - dd/MM/yyyy').format(time.toLocal());
   }
 
+  /// Trả về chênh lệch khối lượng dạng +X kg / -X kg / 0 kg.
+  String get weightChange {
+    final delta = weightNow - weightPre;
+    if (delta > 0) {
+      return '+${delta.toStringAsFixed(1)} kg';
+    }
+    if (delta < 0) {
+      return '${delta.toStringAsFixed(1)} kg';
+    }
+    return '0 kg';
+  }
+
+  /// Tóm tắt biến động phục vụ cột mô tả báo cáo.
+  ///
+  /// Lưu ý: để tính "khoảng thời gian từ bản ghi trước đến hiện tại"
+  /// cần ngữ cảnh bản ghi trước, nên getter này trả về mô tả sẵn dùng.
+  String get durationSummary {
+    try {
+      if (des.trim().isNotEmpty) {
+        return des;
+      }
+
+      return 'ID $idScale | $formattedTime | $weightChange';
+    } catch (_) {
+      return 'Không xác định';
+    }
+  }
+
   static List<SiloHistoryModel> parseListFromResponse(
     dynamic decoded, {
     int defaultId = -1,

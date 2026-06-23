@@ -45,6 +45,7 @@ Future<ExcelExportResult> _downloadByAnchor({
 Future<ExcelExportResult> exportPlanRowsToExcel({
   required String filePrefix,
   required List<Map<String, String>> rows,
+  String? downloadFileName,
 }) async {
   try {
     final now = DateTime.now();
@@ -55,7 +56,10 @@ Future<ExcelExportResult> exportPlanRowsToExcel({
     final timeLabel =
         '${_twoDigits(now.hour)}-${_twoDigits(now.minute)}-${_twoDigits(now.second)}';
     final tableLabel = _tableLabel(filePrefix);
-    final fileName = '${timeLabel}_${dateLabel}_$tableLabel.xlsx';
+    final fileName =
+      (downloadFileName != null && downloadFileName.trim().isNotEmpty)
+      ? downloadFileName.trim()
+      : '${timeLabel}_${dateLabel}_$tableLabel.xlsx';
 
     final excel = Excel.createExcel();
     final sheet = excel['Sheet1'];
