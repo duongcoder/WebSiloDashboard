@@ -37,6 +37,7 @@ class _SiloModuleState extends State<SiloModule> {
 
   double _currentWeight = 0;
   double _maxWeight = 100;
+  bool _isFetchingScale = false;
 
   late final Timer _timer;
 
@@ -53,10 +54,15 @@ class _SiloModuleState extends State<SiloModule> {
   }
 
   Future<void> _loadScaleValue() async {
+    if (_isFetchingScale) return;
+    _isFetchingScale = true;
+
     try {
-      final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/Scales/GetScaleValue?id=1'),
-      );
+      final response = await http
+          .get(
+            Uri.parse('${AppConfig.baseUrl}/Scales/GetScaleValue?id=1'),
+          )
+          .timeout(const Duration(seconds: 8));
 
       if (!mounted) return;
       if (response.statusCode == 200) {
@@ -66,6 +72,8 @@ class _SiloModuleState extends State<SiloModule> {
       }
     } catch (e) {
       debugPrint('Error: $e');
+    } finally {
+      _isFetchingScale = false;
     }
   }
 

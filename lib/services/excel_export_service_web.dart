@@ -1,3 +1,6 @@
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+// File này chỉ được import trên nền tảng Web nhờ cơ chế conditional import
+// của excel_export_service.dart (if dart.library.html). Việc dùng dart:html là chủ động.
 import 'dart:html' as html;
 import 'dart:typed_data';
 

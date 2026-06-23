@@ -6,7 +6,7 @@ class ColDataChart extends StatelessWidget {
   final List<ColData> data;
 
   // Constructor nhận dữ liệu từ bên ngoài
-  const ColDataChart({Key? key, required this.data}) : super(key: key);
+  const ColDataChart({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {

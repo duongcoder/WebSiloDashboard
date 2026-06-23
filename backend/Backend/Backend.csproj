@@ -5,6 +5,10 @@
     <RootNamespace>Backend</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- IIS InProcess hosting: nhanh hơn, được khuyến nghị cho triển khai IIS -->
+    <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
+    <!-- Đảm bảo sinh web.config khi publish -->
+    <IsTransformWebConfigDisabled>false</IsTransformWebConfigDisabled>
   </PropertyGroup>
 
   <ItemGroup>

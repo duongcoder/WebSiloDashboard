@@ -9,7 +9,6 @@ import 'package:responsive_framework/responsive_framework.dart';
 import 'package:signalr_core/signalr_core.dart';
 
 import 'config/app_config.dart';
-import 'models/col_data.dart';
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
@@ -77,7 +76,6 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Silo> _silos = [];
   List<Controller> _controllers = [];
   List<Indicator> _indicators = [];
-  List<ColData> _colData = [];
   List<SiloHistoryModel> _siloHistory = [];
   int _lastProcessedId = -1;
   double _noiseThresholdKg = 5.0;
@@ -87,30 +85,6 @@ class _DashboardPageState extends State<DashboardPage> {
   Timer? _autoReportExportTimer;
   DateTime? _lastReportExportAt;
   bool _isFetchingPumpPlan = false;
-
-  final List<Map<String, String>> _dumpPlanRows = [
-    {
-      'time': '08:00 - 08:20',
-      'silo': 'Silo 1',
-      'material': 'Thóc',
-      'qty': '260',
-      'status': 'Chờ',
-    },
-    {
-      'time': '08:20 - 08:40',
-      'silo': 'Silo 3',
-      'material': 'Gạo',
-      'qty': '180',
-      'status': 'Đang bơm',
-    },
-    {
-      'time': '08:40 - 09:00',
-      'silo': 'Silo 5',
-      'material': 'Đậu',
-      'qty': '140',
-      'status': 'Đã xong',
-    },
-  ];
 
   @override
   void initState() {
@@ -210,7 +184,6 @@ class _DashboardPageState extends State<DashboardPage> {
       _loadSilos(),
       _loadIndicators(),
       _loadControllers(),
-      _loadColData(),
       _fetchPumpPlan(),
     ]);
 
@@ -300,21 +273,10 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  int _resolveHistoryId() {
-    if (_silos.isEmpty) return -1;
-
-    final siloId = _silos.first.id;
-    final direct = int.tryParse(siloId);
-    if (direct != null) return direct;
-
-    final extracted = RegExp(r'\d+').firstMatch(siloId)?.group(0);
-    return int.tryParse(extracted ?? '') ?? -1;
-  }
-
   Future<void> _initSignalR() async {
     try {
       hubConnection = HubConnectionBuilder()
-          .withUrl('http://${AppConfig.serverIp}:${AppConfig.apiPort}/siloHub')
+          .withUrl(AppConfig.signalRHubUrl)
           .build();
 
       hubConnection.on('ReceiveScaleValue', (List<Object?>? args) {
@@ -406,18 +368,6 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } catch (e) {
       debugPrint('Error loading controllers: $e');
-    }
-  }
-
-  Future<void> _loadColData() async {
-    try {
-      final colDataList = await ApiService.fetchColData();
-      if (!mounted) return;
-      setState(() {
-        _colData = colDataList;
-      });
-    } catch (e) {
-      debugPrint('Error loading ColData: $e');
     }
   }
 
@@ -587,39 +537,6 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  List<Map<String, String>> _getWarningRowsFromSilos({
-    required List<Silo> silos,
-    required String nowTimeLabel,
-  }) {
-    String statusByLevel(double level) {
-      if (level > 0.2) return 'Đang hoạt động';
-      return 'Dừng hoạt động';
-    }
-
-    String severityByLevel(double level) {
-      if (level < 0.2) return 'Mức thấp';
-      if (level <= 0.7) return 'Trung bình';
-      return 'Mức cao';
-    }
-
-    String contentByLevel(double level) {
-      final pct = (level * 100).toInt();
-      if (level < 0.2) return 'Mức chứa thấp: $pct%';
-      if (level <= 0.7) return 'Mức chứa trung bình: $pct%';
-      return 'Mức chứa cao: $pct%';
-    }
-
-    return silos.map((silo) {
-      return {
-        'time': nowTimeLabel,
-        'silo': silo.id,
-        'content': contentByLevel(silo.level),
-        'severity': severityByLevel(silo.level),
-        'status': statusByLevel(silo.level),
-      };
-    }).toList();
-  }
-
   void _select(int index, String label) {
     setState(() {
       _selectedIndex = index;
@@ -649,16 +566,6 @@ class _DashboardPageState extends State<DashboardPage> {
       return Colors.blue.shade200;
     }
 
-    return Colors.grey.shade200;
-  }
-
-  Color _severityColor(String severity) {
-    final s = severity.toLowerCase();
-    if (s.contains('mức thấp') || s.contains('muc thap')) return Colors.red.shade200;
-    if (s.contains('trung bình') || s.contains('trung binh')) {
-      return Colors.yellow.shade200;
-    }
-    if (s.contains('mức cao') || s.contains('muc cao')) return Colors.green.shade200;
     return Colors.grey.shade200;
   }
 
@@ -764,12 +671,12 @@ class _DashboardPageState extends State<DashboardPage> {
     return Container(
       width: sidebarWidth,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: Colors.white.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.blue.shade100),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -919,8 +826,8 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  List<_SiloVolumePoint> _buildSiloVolumePoints() {
-    if (_siloHistory.isEmpty) return const <_SiloVolumePoint>[];
+  List<SiloVolumePoint> _buildSiloVolumePoints() {
+    if (_siloHistory.isEmpty) return const <SiloVolumePoint>[];
 
     final timeframeDuration = _timeframeDurations[_selectedTimeframe] ??
         const Duration(hours: 1);
@@ -949,7 +856,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
           return true;
         })
-        .map((row) => _SiloVolumePoint(
+        .map((row) => SiloVolumePoint(
               time: row.time,
               weight: row.weightNow.toDouble(),
             ))
@@ -963,7 +870,7 @@ class _DashboardPageState extends State<DashboardPage> {
           : _siloHistory;
 
       return latestRows
-          .map((row) => _SiloVolumePoint(
+          .map((row) => SiloVolumePoint(
                 time: row.time,
                 weight: row.weightNow.toDouble(),
               ))
@@ -1058,78 +965,6 @@ class _DashboardPageState extends State<DashboardPage> {
           transformationController: _chartTransformController,
         ),
       ],
-    );
-  }
-
-  Widget _buildWarningTableCard({required List<Map<String, String>> rows}) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Text(
-              'Bảng cảnh báo',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: DataTable(
-                headingRowColor: WidgetStateProperty.resolveWith(
-                  (states) => Colors.orange.shade50,
-                ),
-                dataRowMinHeight: 44,
-                columnSpacing: 20,
-                columns: const [
-                  DataColumn(label: Text('Thời gian')),
-                  DataColumn(label: Text('Silo')),
-                  DataColumn(label: Text('Nội dung')),
-                  DataColumn(label: Text('Mức độ')),
-                  DataColumn(label: Text('Trạng thái')),
-                ],
-                rows: List<DataRow>.generate(rows.length, (index) {
-                  final row = rows[index];
-                  final status = row['status'] ?? '';
-                  final severity = row['severity'] ?? '';
-
-                  return DataRow(
-                    cells: [
-                      DataCell(Text(row['time'] ?? '')),
-                      DataCell(Text(row['silo'] ?? '')),
-                      DataCell(Text(row['content'] ?? '')),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _severityColor(severity),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(severity, style: const TextStyle(fontSize: 12)),
-                        ),
-                      ),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _statusColor(status),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(status, style: const TextStyle(fontSize: 12)),
-                        ),
-                      ),
-                    ],
-                  );
-                }),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1232,6 +1067,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     );
 
                     if (result == null) return;
+                    if (!mounted) return;
 
                     final time = result['time'] ?? '';
                     final silo = result['silo'] ?? '';
@@ -1369,16 +1205,6 @@ class _DashboardPageState extends State<DashboardPage> {
       addSnackBarText: 'Đã thêm kế hoạch',
       deleteSnackBarText: 'Đã xóa kế hoạch',
       exportFilePrefix: 'ke_hoach_bom',
-    );
-  }
-
-  Widget _buildDumpPlanCard() {
-    return _buildPlanCard(
-      title: 'Danh sách kế hoạch',
-      rows: _dumpPlanRows,
-      addSnackBarText: 'Đã thêm kế hoạch xả',
-      deleteSnackBarText: 'Đã xóa kế hoạch xả',
-      exportFilePrefix: 'ke_hoach_xa',
     );
   }
 
@@ -1854,11 +1680,11 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-class _SiloVolumePoint {
+class SiloVolumePoint {
   final DateTime time;
   final double weight;
 
-  const _SiloVolumePoint({
+  const SiloVolumePoint({
     required this.time,
     required this.weight,
   });
@@ -1866,7 +1692,7 @@ class _SiloVolumePoint {
 
 class SiloVolumeChart extends StatelessWidget {
   final String title;
-  final List<_SiloVolumePoint> points;
+  final List<SiloVolumePoint> points;
   final int rawCount;
   final String selectedTimeframe;
   final List<String> timeframeOptions;
@@ -1929,9 +1755,9 @@ class SiloVolumeChart extends StatelessWidget {
     final minY = hasData ? minWeight * 0.9 : 0.0;
     final maxY = hasData ? maxWeight * 1.1 : 50000.0;
     final xInterval = hasData
-      ? (((maxX - minX) / 4).clamp(1.0, double.infinity) as double)
+      ? ((maxX - minX) / 4).clamp(1.0, double.infinity)
       : 1.0;
-    final yInterval = (((maxY - minY) / 5).clamp(1.0, double.infinity) as double);
+    final yInterval = ((maxY - minY) / 5).clamp(1.0, double.infinity);
 
     return Card(
       elevation: 3,

@@ -46,16 +46,22 @@ namespace Backend
 
                     if (builder.Environment.IsDevelopment())
                     {
-                        // Môi trường DEV: Cho phép TẤT CẢ các Origin/Cổng ngẫu nhiên từ Flutter Web
-                        // Hàm này biến đổi Origin động để vượt qua ràng buộc khắt khe của AllowCredentials()
+                        // Môi trường DEV: Cho phép TẤT CẢ Origin để Flutter Web dev port ngẫu nhiên hoạt động.
                         policy.SetIsOriginAllowed(origin => true);
                     }
                     else
                     {
-                        // Môi trường KHÁCH HÀNG (Production): Ép buộc bảo mật đúng danh sách cấu hình
+                        // Môi trường PRODUCTION (IIS):
                         if (allowedOrigins.Length > 0)
                         {
+                            // Có cấu hình rõ: chỉ cho phép đúng danh sách.
                             policy.WithOrigins(allowedOrigins);
+                        }
+                        else
+                        {
+                            // Chưa cấu hình AllowedOrigins: cho phép mọi origin (safe fallback cho
+                            // triển khai nội bộ mà không có domain cố định).
+                            policy.SetIsOriginAllowed(origin => true);
                         }
                     }
                 });
@@ -79,13 +85,17 @@ namespace Backend
             
             app.UseAuthorization();
 
-            // Cấu hình Swagger UI trang gốc
-            app.UseSwagger();
-            app.UseSwaggerUI(c =>
+            // Swagger: hiển thị mọi môi trường (có thể ẩn production bằng cách set ENABLE_SWAGGER=false)
+            var enableSwagger = builder.Configuration.GetValue<bool?>("EnableSwagger") ?? true;
+            if (enableSwagger)
             {
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Silo API V1");
-                c.RoutePrefix = string.Empty; 
-            });
+                app.UseSwagger();
+                app.UseSwaggerUI(c =>
+                {
+                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Silo API V1");
+                    c.RoutePrefix = "swagger";
+                });
+            }
 
             app.MapControllers();
             app.MapHub<SiloHub>("/siloHub");
