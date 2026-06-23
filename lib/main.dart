@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:signalr_core/signalr_core.dart';
 
@@ -71,6 +72,9 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isInitialLoading = true;
   final TransformationController _chartTransformController =
       TransformationController();
+  final ScrollController _statsScrollController = ScrollController();
+  final ScrollController _pumpPlanTableScrollController = ScrollController();
+  final ScrollController _statisticsTableScrollController = ScrollController();
   late final SiloApiService _siloApiService;
   StreamSubscription<List<SiloHistoryModel>>? _historySubscription;
 
@@ -114,6 +118,9 @@ class _DashboardPageState extends State<DashboardPage> {
     _historySubscription?.cancel();
     _siloApiService.dispose();
     _chartTransformController.dispose();
+    _statsScrollController.dispose();
+    _pumpPlanTableScrollController.dispose();
+    _statisticsTableScrollController.dispose();
     hubConnection.stop();
     super.dispose();
   }
@@ -145,7 +152,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 : <String, dynamic>{};
 
             return {
-              'time': (map['timeStart'] ?? '').toString(),
+              'time': _formatPumpPlanTime(map['timeStart']),
               'silo': 'Silo ${(map['id_relay'] ?? '').toString()}',
               'material': (map['des'] ?? '').toString(),
               'qty': (map['weight'] ?? '').toString(),
@@ -178,6 +185,19 @@ class _DashboardPageState extends State<DashboardPage> {
     if (value is int) return value;
     if (value is String) return int.tryParse(value) ?? -1;
     return -1;
+  }
+
+  String _formatPumpPlanTime(dynamic value) {
+    final raw = (value ?? '').toString().trim();
+    if (raw.isEmpty) return '';
+
+    try {
+      final parsed = DateTime.tryParse(raw);
+      if (parsed == null) return raw;
+      return DateFormat('HH:mm:ss - dd/MM/yyyy').format(parsed.toLocal());
+    } catch (_) {
+      return raw;
+    }
   }
 
   Future<void> _loadInitialData() async {
@@ -525,6 +545,48 @@ class _DashboardPageState extends State<DashboardPage> {
     return Colors.grey.shade200;
   }
 
+  double _tableRowMinHeight(bool isMobile) => isMobile ? 46 : 44;
+
+  double _tableColumnSpacing(bool isMobile) => isMobile ? 14 : 22;
+
+  double _tableHorizontalMargin(bool isMobile) => isMobile ? 10 : 16;
+
+  Widget _buildInfoBadge(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade100),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.blue.shade900,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String status, {required bool isMobile}) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 8 : 10,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: _statusColor(status),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        status,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   Widget _buildSidebarItem({
     required IconData icon,
     required String label,
@@ -768,8 +830,10 @@ class _DashboardPageState extends State<DashboardPage> {
           },
         ),
         child: Scrollbar(
+          controller: _statsScrollController,
           thumbVisibility: true,
           child: SingleChildScrollView(
+            controller: _statsScrollController,
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             child: Padding(
@@ -934,222 +998,314 @@ class _DashboardPageState extends State<DashboardPage> {
     return Card(
       elevation: 4,
       margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Row(
-              children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final result = await exportPlanRowsToExcel(
-                      filePrefix: exportFilePrefix,
-                      rows: rows,
-                    );
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 600;
 
-                    if (!mounted) return;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.end,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final result = await exportPlanRowsToExcel(
+                                filePrefix: exportFilePrefix,
+                                rows: rows,
+                              );
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(result.message)),
-                    );
-                  },
-                  icon: const Icon(Icons.table_view),
-                  label: const Text('Xuất excel'),
+                              if (!mounted) return;
+
+                              messenger.showSnackBar(
+                                SnackBar(content: Text(result.message)),
+                              );
+                            },
+                            icon: const Icon(Icons.table_view),
+                            label: const Text('Xuất excel'),
+                          ),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final result = await showDialog<Map<String, String>>(
+                                context: context,
+                                builder: (dialogContext) {
+                                  final timeController = TextEditingController();
+                                  final siloController = TextEditingController();
+                                  final materialController = TextEditingController();
+                                  final qtyController = TextEditingController();
+                                  final statusController = TextEditingController(text: 'Chờ');
+
+                                  return AlertDialog(
+                                    title: const Text('Thêm kế hoạch'),
+                                    content: SingleChildScrollView(
+                                      child: Column(
+                                        children: [
+                                          TextField(
+                                            controller: timeController,
+                                            decoration: const InputDecoration(labelText: 'Thời gian'),
+                                          ),
+                                          TextField(
+                                            controller: siloController,
+                                            decoration: const InputDecoration(labelText: 'Silo'),
+                                          ),
+                                          TextField(
+                                            controller: materialController,
+                                            decoration: const InputDecoration(labelText: 'Nguyên liệu'),
+                                          ),
+                                          TextField(
+                                            controller: qtyController,
+                                            keyboardType: TextInputType.number,
+                                            decoration: const InputDecoration(labelText: 'Số lượng'),
+                                          ),
+                                          TextField(
+                                            controller: statusController,
+                                            decoration: const InputDecoration(labelText: 'Trạng thái'),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.of(dialogContext).pop(),
+                                        child: const Text('Hủy'),
+                                      ),
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          Navigator.of(dialogContext).pop({
+                                            'time': timeController.text.trim(),
+                                            'silo': siloController.text.trim(),
+                                            'material': materialController.text.trim(),
+                                            'qty': qtyController.text.trim(),
+                                            'status': statusController.text.trim(),
+                                          });
+                                        },
+                                        child: const Text('Thêm'),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+
+                              if (result == null) return;
+                              if (!mounted) return;
+
+                              final time = result['time'] ?? '';
+                              final silo = result['silo'] ?? '';
+                              final material = result['material'] ?? '';
+                              final qty = result['qty'] ?? '';
+                              final status = result['status'] ?? '';
+
+                              if (time.isEmpty ||
+                                  silo.isEmpty ||
+                                  material.isEmpty ||
+                                  qty.isEmpty ||
+                                  status.isEmpty) {
+                                messenger.showSnackBar(
+                                  const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
+                                );
+                                return;
+                              }
+
+                              setState(() {
+                                rows.add({
+                                  'time': time,
+                                  'silo': silo,
+                                  'material': material,
+                                  'qty': qty,
+                                  'status': status,
+                                });
+                              });
+
+                              messenger.showSnackBar(
+                                SnackBar(content: Text(addSnackBarText)),
+                              );
+                            },
+                            icon: const Icon(Icons.add),
+                            label: const Text('Thêm kế hoạch'),
+                          ),
+                          _buildInfoBadge('Hiển thị: ${rows.length}'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    final result = await showDialog<Map<String, String>>(
-                      context: context,
-                      builder: (dialogContext) {
-                        final timeController = TextEditingController();
-                        final siloController = TextEditingController();
-                        final materialController = TextEditingController();
-                        final qtyController = TextEditingController();
-                        final statusController = TextEditingController(text: 'Chờ');
-
-                        return AlertDialog(
-                          title: const Text('Thêm kế hoạch'),
-                          content: SingleChildScrollView(
-                            child: Column(
-                              children: [
-                                TextField(
-                                  controller: timeController,
-                                  decoration: const InputDecoration(labelText: 'Thời gian'),
-                                ),
-                                TextField(
-                                  controller: siloController,
-                                  decoration: const InputDecoration(labelText: 'Silo'),
-                                ),
-                                TextField(
-                                  controller: materialController,
-                                  decoration: const InputDecoration(labelText: 'Nguyên liệu'),
-                                ),
-                                TextField(
-                                  controller: qtyController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(labelText: 'Số lượng'),
-                                ),
-                                TextField(
-                                  controller: statusController,
-                                  decoration: const InputDecoration(labelText: 'Trạng thái'),
-                                ),
-                              ],
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: isMobile
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue.shade900,
                             ),
                           ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(dialogContext).pop(),
-                              child: const Text('Hủy'),
+                          Slider(
+                            value: _noiseThresholdKg,
+                            min: 1,
+                            max: 100,
+                            divisions: 99,
+                            label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                            onChanged: (value) {
+                              setState(() {
+                                _noiseThresholdKg = value;
+                              });
+                            },
+                          ),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Text(
+                            'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blue.shade900,
                             ),
-                            ElevatedButton(
-                              onPressed: () {
-                                Navigator.of(dialogContext).pop({
-                                  'time': timeController.text.trim(),
-                                  'silo': siloController.text.trim(),
-                                  'material': materialController.text.trim(),
-                                  'qty': qtyController.text.trim(),
-                                  'status': statusController.text.trim(),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Slider(
+                              value: _noiseThresholdKg,
+                              min: 1,
+                              max: 100,
+                              divisions: 99,
+                              label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
+                              onChanged: (value) {
+                                setState(() {
+                                  _noiseThresholdKg = value;
                                 });
                               },
-                              child: const Text('Thêm'),
                             ),
-                          ],
-                        );
-                      },
-                    );
-
-                    if (result == null) return;
-                    if (!mounted) return;
-
-                    final time = result['time'] ?? '';
-                    final silo = result['silo'] ?? '';
-                    final material = result['material'] ?? '';
-                    final qty = result['qty'] ?? '';
-                    final status = result['status'] ?? '';
-
-                    if (time.isEmpty ||
-                        silo.isEmpty ||
-                        material.isEmpty ||
-                        qty.isEmpty ||
-                        status.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
-                      );
-                      return;
-                    }
-
-                    setState(() {
-                      rows.add({
-                        'time': time,
-                        'silo': silo,
-                        'material': material,
-                        'qty': qty,
-                        'status': status,
-                      });
-                    });
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(addSnackBarText)),
-                    );
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('Thêm kế hoạch'),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: Row(
-              children: [
-                Text(
-                  'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.blue.shade900,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Slider(
-                    value: _noiseThresholdKg,
-                    min: 1,
-                    max: 100,
-                    divisions: 99,
-                    label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                    onChanged: (value) {
-                      setState(() {
-                        _noiseThresholdKg = value;
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: DataTable(
-                headingRowColor: WidgetStateProperty.resolveWith(
-                  (states) => Colors.blue.shade50,
-                ),
-                dataRowMinHeight: 44,
-                columnSpacing: 24,
-                columns: const [
-                  DataColumn(label: Text('Thời gian')),
-                  DataColumn(label: Text('Silo')),
-                  DataColumn(label: Text('Nguyên liệu')),
-                  DataColumn(label: Text('Số lượng'), numeric: true),
-                  DataColumn(label: Text('Trạng thái')),
-                  DataColumn(label: Text('Xóa')),
-                ],
-                rows: List<DataRow>.generate(rows.length, (index) {
-                  final row = rows[index];
-                  final status = row['status'] ?? '';
-                  return DataRow(
-                    cells: [
-                      DataCell(Text(row['time'] ?? '')),
-                      DataCell(Text(row['silo'] ?? '')),
-                      DataCell(Text(row['material'] ?? '')),
-                      DataCell(Text(row['qty'] ?? '')),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _statusColor(status),
-                            borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text(status, style: const TextStyle(fontSize: 12)),
-                        ),
+                        ],
                       ),
-                      DataCell(
-                        IconButton(
-                          tooltip: 'Xóa kế hoạch',
-                          icon: const Icon(Icons.delete_forever, color: Colors.red),
-                          onPressed: () {
-                            setState(() {
-                              rows.removeAt(index);
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(deleteSnackBarText)),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  );
-                }),
               ),
-            ),
-          ),
-        ],
+              ScrollConfiguration(
+                behavior: const MaterialScrollBehavior().copyWith(
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
+                    PointerDeviceKind.unknown,
+                  },
+                ),
+                child: Scrollbar(
+                  controller: _pumpPlanTableScrollController,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _pumpPlanTableScrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.resolveWith(
+                          (states) => Colors.blue.shade50,
+                        ),
+                        dataRowMinHeight: _tableRowMinHeight(isMobile),
+                        columnSpacing: _tableColumnSpacing(isMobile),
+                        horizontalMargin: _tableHorizontalMargin(isMobile),
+                        columns: [
+                          const DataColumn(label: Text('Thời gian')),
+                          if (!isMobile) const DataColumn(label: Text('Silo')),
+                          if (!isMobile) const DataColumn(label: Text('Nguyên liệu')),
+                          const DataColumn(label: Text('Số lượng'), numeric: true),
+                          const DataColumn(label: Text('Trạng thái')),
+                          const DataColumn(label: Text('Xóa')),
+                        ],
+                        rows: List<DataRow>.generate(rows.length, (index) {
+                          final row = rows[index];
+                          final status = row['status'] ?? '';
+
+                          return DataRow(
+                            cells: [
+                              DataCell(
+                                SizedBox(
+                                  width: isMobile ? 220 : 240,
+                                  child: Text(
+                                    row['time'] ?? '',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                              if (!isMobile)
+                                DataCell(
+                                  SizedBox(
+                                    width: 90,
+                                    child: Text(
+                                      row['silo'] ?? '',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              if (!isMobile)
+                                DataCell(
+                                  SizedBox(
+                                    width: 180,
+                                    child: Text(
+                                      row['material'] ?? '',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              DataCell(
+                                SizedBox(
+                                  width: 90,
+                                  child: Text(row['qty'] ?? ''),
+                                ),
+                              ),
+                              DataCell(_buildStatusBadge(status, isMobile: isMobile)),
+                              DataCell(
+                                SizedBox(
+                                  width: 56,
+                                  child: IconButton(
+                                    tooltip: 'Xóa kế hoạch',
+                                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                                    onPressed: () {
+                                      setState(() {
+                                        rows.removeAt(index);
+                                      });
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(deleteSnackBarText)),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1204,84 +1360,120 @@ class _DashboardPageState extends State<DashboardPage> {
                       label: const Text('Xuất excel'),
                     ),
                     const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.shade100),
-                      ),
-                      child: Text(
-                        'Hiển thị: ${rows.length}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue.shade900,
-                        ),
-                      ),
-                    ),
+                    _buildInfoBadge('Hiển thị: ${rows.length}'),
                   ],
                 ),
               ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.resolveWith(
-                      (states) => Colors.blue.shade50,
-                    ),
-                    dataRowMinHeight: 44,
-                    columnSpacing: isMobile ? 14 : 22,
-                    columns: [
-                      const DataColumn(label: Text('STT')),
-                      if (!isMobile) const DataColumn(label: Text('ID Cân')),
-                      const DataColumn(label: Text('Số cân')),
-                      const DataColumn(label: Text('Thời gian')),
-                      const DataColumn(label: Text('Chi tiết')),
-                    ],
-                    rows: rows.isNotEmpty
-                        ? List<DataRow>.generate(rows.length, (index) {
-                            final item = rows[index];
+              ScrollConfiguration(
+                behavior: const MaterialScrollBehavior().copyWith(
+                  dragDevices: {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
+                    PointerDeviceKind.unknown,
+                  },
+                ),
+                child: Scrollbar(
+                  controller: _statisticsTableScrollController,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _statisticsTableScrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.resolveWith(
+                          (states) => Colors.blue.shade50,
+                        ),
+                        dataRowMinHeight: _tableRowMinHeight(isMobile),
+                        columnSpacing: _tableColumnSpacing(isMobile),
+                        horizontalMargin: _tableHorizontalMargin(isMobile),
+                        columns: [
+                          const DataColumn(label: Text('STT')),
+                          if (!isMobile) const DataColumn(label: Text('ID Cân')),
+                          const DataColumn(label: Text('Số cân')),
+                          const DataColumn(label: Text('Thời gian')),
+                          const DataColumn(label: Text('Chi tiết')),
+                        ],
+                        rows: rows.isNotEmpty
+                            ? List<DataRow>.generate(rows.length, (index) {
+                                final item = rows[index];
 
-                            final cells = <DataCell>[
-                              DataCell(Text('${index + 1}')),
-                              if (!isMobile) DataCell(Text('${item.milestone.idScale}')),
-                              DataCell(
-                                Text(
-                                  item.weightChangeText,
-                                  style: TextStyle(
-                                    color: changeColor(item.weightChangeText),
-                                    fontWeight: FontWeight.w700,
+                                final cells = <DataCell>[
+                                  DataCell(
+                                    SizedBox(
+                                      width: 56,
+                                      child: Text('${index + 1}'),
+                                    ),
                                   ),
-                                ),
-                              ),
-                              DataCell(Text(item.timeRangeText)),
-                              DataCell(
-                                SizedBox(
-                                  width: isMobile ? 220 : 420,
-                                  child: Text(
-                                    item.detailText,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  if (!isMobile)
+                                    DataCell(
+                                      SizedBox(
+                                        width: 90,
+                                        child: Text('${item.milestone.idScale}'),
+                                      ),
+                                    ),
+                                  DataCell(
+                                    SizedBox(
+                                      width: 90,
+                                      child: Text(
+                                        item.weightChangeText,
+                                        style: TextStyle(
+                                          color: changeColor(item.weightChangeText),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ];
+                                  DataCell(
+                                    SizedBox(
+                                      width: isMobile ? 220 : 240,
+                                      child: Text(
+                                        item.timeRangeText,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    SizedBox(
+                                      width: isMobile ? 220 : 420,
+                                      child: Text(
+                                        item.detailText,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ];
 
-                            return DataRow(cells: cells);
-                          })
-                        : [
-                            DataRow(
-                              cells: [
-                                const DataCell(Text('-')),
-                                if (!isMobile) const DataCell(Text('-')),
-                                const DataCell(Text('0 kg')),
-                                const DataCell(Text('Chưa có dữ liệu')),
-                                const DataCell(Text('-')),
+                                return DataRow(cells: cells);
+                              })
+                            : [
+                                DataRow(
+                                  cells: [
+                                    const DataCell(SizedBox(width: 56, child: Text('-'))),
+                                    if (!isMobile)
+                                      const DataCell(SizedBox(width: 90, child: Text('-'))),
+                                    const DataCell(SizedBox(width: 90, child: Text('0 kg'))),
+                                    DataCell(
+                                      SizedBox(
+                                        width: isMobile ? 220 : 240,
+                                        child: const Text('Chưa có dữ liệu'),
+                                      ),
+                                    ),
+                                    DataCell(
+                                      SizedBox(
+                                        width: isMobile ? 220 : 420,
+                                        child: const Text('-'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
-                            ),
-                          ],
+                      ),
+                    ),
                   ),
                 ),
               ),
