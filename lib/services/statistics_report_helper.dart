@@ -40,38 +40,65 @@ List<CompressedStatisticsReportItem> generateCompressedStatisticsReport(
       return a.id.compareTo(b.id);
     });
 
-  // Theo yêu cầu: < 2 phần tử thì giữ nguyên danh sách (không nén thêm).
+  // Không đủ dữ liệu để tạo biến động thực tế.
   if (sorted.length < 2) {
-    final only = sorted.first;
-    return <CompressedStatisticsReportItem>[
-      _buildReportItem(milestone: only, previous: null),
-    ];
+    return const <CompressedStatisticsReportItem>[];
   }
 
-  final milestones = <SiloHistoryModel>[sorted.first];
-  var currentTrend = _detectTrend(
-    previousWeight: sorted.first.weightNow,
-    currentWeight: sorted[1].weightNow,
-  );
+  final milestones = <SiloHistoryModel>[];
+  _TrendDirection? currentTrend;
+  var lastMovingIndex = -1;
 
-  for (var i = 2; i < sorted.length; i++) {
+  for (var i = 1; i < sorted.length; i++) {
+    final previous = sorted[i - 1];
+    final current = sorted[i];
+    final delta = current.weightNow - previous.weightNow;
+
+    // Bỏ toàn bộ điểm/đoạn đứng yên theo quy tắc dự án.
+    if (delta == 0) {
+      continue;
+    }
+
     final nextTrend = _detectTrend(
-      previousWeight: sorted[i - 1].weightNow,
-      currentWeight: sorted[i].weightNow,
+      previousWeight: previous.weightNow,
+      currentWeight: current.weightNow,
     );
 
-    if (nextTrend != currentTrend) {
-      _addIfNewMilestone(milestones, sorted[i - 1]);
+    if (currentTrend == null) {
+      _addIfNewMilestone(milestones, previous);
+      currentTrend = nextTrend;
+    } else if (nextTrend != currentTrend) {
+      // Khi đổi hướng, chốt điểm kết thúc của xu hướng trước.
+      _addIfNewMilestone(milestones, previous);
       currentTrend = nextTrend;
     }
+
+    lastMovingIndex = i;
   }
 
-  _addIfNewMilestone(milestones, sorted.last);
+  // Không có biến động thực tế nào.
+  if (lastMovingIndex < 0) {
+    return const <CompressedStatisticsReportItem>[];
+  }
+
+  // Chốt điểm cuối của đợt xu hướng cuối cùng.
+  _addIfNewMilestone(milestones, sorted[lastMovingIndex]);
+
+  if (milestones.length < 2) {
+    return const <CompressedStatisticsReportItem>[];
+  }
 
   final result = <CompressedStatisticsReportItem>[];
-  for (var i = 0; i < milestones.length; i++) {
+  for (var i = 1; i < milestones.length; i++) {
     final current = milestones[i];
-    final previous = i > 0 ? milestones[i - 1] : null;
+    final previous = milestones[i - 1];
+    final delta = current.weightNow - previous.weightNow;
+
+    // Chặn tuyệt đối mọi bản ghi 0 kg ở đầu ra.
+    if (delta == 0) {
+      continue;
+    }
+
     result.add(_buildReportItem(milestone: current, previous: previous));
   }
 
