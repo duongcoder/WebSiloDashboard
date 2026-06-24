@@ -284,7 +284,7 @@ class _WeightInfo extends StatelessWidget {
               ? '${lastUpdatedAt!.hour.toString().padLeft(2, '0')}:${lastUpdatedAt!.minute.toString().padLeft(2, '0')}:${lastUpdatedAt!.second.toString().padLeft(2, '0')}'
               : '',
           style: TextStyle(
-            fontSize: isMobile ? 11 : 12,
+            fontSize: isMobile ? 12 : 14,
             color: Colors.grey,
             fontWeight: FontWeight.w500,
           ),
@@ -296,7 +296,7 @@ class _WeightInfo extends StatelessWidget {
               ? '${lastUpdatedAt!.day.toString().padLeft(2, '0')}/${lastUpdatedAt!.month.toString().padLeft(2, '0')}/${lastUpdatedAt!.year}'
               : '',
           style: TextStyle(
-            fontSize: isMobile ? 11 : 12,
+            fontSize: isMobile ? 12 : 14,
             color: Colors.grey,
             fontWeight: FontWeight.w500,
           ),
