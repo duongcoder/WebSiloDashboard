@@ -37,6 +37,9 @@ class _SiloModuleState extends State<SiloModule> {
   double _currentWeight = 0;
   bool _isFetchingScale = false;
 
+  DateTime? _lastUpdatedAt;
+
+
   late final Timer _timer;
 
   @override
@@ -66,7 +69,15 @@ class _SiloModuleState extends State<SiloModule> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final value = (data['value'] as num).toDouble();
-        setState(() => _currentWeight = value);
+        setState(() {
+          _currentWeight = value;
+          final dynamic rawTime = data['dateTime'];
+          if (rawTime is String) {
+            _lastUpdatedAt = DateTime.tryParse(rawTime);
+          } else {
+            _lastUpdatedAt = null;
+          }
+        });
       }
     } catch (e) {
       debugPrint('Error: $e');
@@ -145,6 +156,7 @@ class _SiloModuleState extends State<SiloModule> {
           valueFontSize: isMobile ? valueFontSize : (valueFontSize + 6).clamp(18.0, 30.0),
           weightValue: weightValue,
           isMobile: isMobile,
+          lastUpdatedAt: _lastUpdatedAt,
         );
 
         final content = isMobile
@@ -224,12 +236,14 @@ class _WeightInfo extends StatelessWidget {
   final String weightValue;
   final bool isMobile;
 
+  final DateTime? lastUpdatedAt;
 
   const _WeightInfo({
     required this.labelFontSize,
     required this.valueFontSize,
     required this.weightValue,
     required this.isMobile,
+    this.lastUpdatedAt,
   });
 
   @override
@@ -260,6 +274,35 @@ class _WeightInfo extends StatelessWidget {
           softWrap: false,
           maxLines: 1,
         ),
+
+        // BEGIN: TIME
+        SizedBox(height: isMobile ? 8 : 12),
+        Text(
+
+
+          lastUpdatedAt != null
+              ? '${lastUpdatedAt!.hour.toString().padLeft(2, '0')}:${lastUpdatedAt!.minute.toString().padLeft(2, '0')}:${lastUpdatedAt!.second.toString().padLeft(2, '0')}'
+              : '',
+          style: TextStyle(
+            fontSize: isMobile ? 11 : 12,
+            color: Colors.grey,
+            fontWeight: FontWeight.w500,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        SizedBox(height: isMobile ? 2 : 4),
+        Text(
+          lastUpdatedAt != null
+              ? '${lastUpdatedAt!.day.toString().padLeft(2, '0')}/${lastUpdatedAt!.month.toString().padLeft(2, '0')}/${lastUpdatedAt!.year}'
+              : '',
+          style: TextStyle(
+            fontSize: isMobile ? 11 : 12,
+            color: Colors.grey,
+            fontWeight: FontWeight.w500,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        // END: TIME,
       ],
     );
   }
