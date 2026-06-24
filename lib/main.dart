@@ -87,9 +87,11 @@ class _DashboardPageState extends State<DashboardPage> {
   List<SiloHistoryModel> _siloHistory = [];
   int _lastProcessedId = -1;
   double _noiseThresholdKg = 5.0;
+  final Map<int, double> _siloNoiseThresholdConfig = <int, double>{};
   final Map<int, double> _siloMaxConfig = <int, double>{};
   int? _selectedSettingsSiloId;
   String? _settingsMaxWeightError;
+  double _settingsNoiseThresholdKg = 5.0;
   final TextEditingController _settingsMaxWeightController =
       TextEditingController(text: '100');
 
@@ -218,6 +220,26 @@ class _DashboardPageState extends State<DashboardPage> {
     return prefs.getDouble('silo_config_max_$siloId') ?? _defaultSiloMaxWeight;
   }
 
+  Future<void> saveSiloNoiseConfig(int siloId, double noiseThresholdKg) async {
+    if (siloId <= 0 || noiseThresholdKg < 0) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('silo_noise_threshold_$siloId', noiseThresholdKg);
+
+    if (!mounted) return;
+    setState(() {
+      _siloNoiseThresholdConfig[siloId] = noiseThresholdKg;
+      if (_getActiveSiloId() == siloId) {
+        _noiseThresholdKg = noiseThresholdKg;
+      }
+    });
+  }
+
+  Future<double> loadSiloNoiseConfig(int siloId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble('silo_noise_threshold_$siloId') ?? 5.0;
+  }
+
   int _extractSiloId(String siloIdText, {int? fallback}) {
     final direct = int.tryParse(siloIdText.trim());
     if (direct != null && direct > 0) return direct;
@@ -231,6 +253,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _loadAllSiloConfigs(List<Silo> silos) async {
     final Map<int, double> loaded = <int, double>{};
+    final Map<int, double> loadedNoise = <int, double>{};
     final List<int> availableIds = <int>[];
 
     for (var i = 0; i < silos.length; i++) {
@@ -240,6 +263,7 @@ class _DashboardPageState extends State<DashboardPage> {
         availableIds.add(siloId);
       }
       loaded[siloId] = await loadSiloConfig(siloId);
+      loadedNoise[siloId] = await loadSiloNoiseConfig(siloId);
     }
 
     if (!mounted) return;
@@ -247,11 +271,16 @@ class _DashboardPageState extends State<DashboardPage> {
       _siloMaxConfig
         ..clear()
         ..addAll(loaded);
+      _siloNoiseThresholdConfig
+        ..clear()
+        ..addAll(loadedNoise);
 
       if (availableIds.isEmpty) {
         _selectedSettingsSiloId = null;
         _settingsMaxWeightController.text = '';
         _settingsMaxWeightError = null;
+        _settingsNoiseThresholdKg = 5.0;
+        _noiseThresholdKg = 5.0;
         return;
       }
 
@@ -264,11 +293,18 @@ class _DashboardPageState extends State<DashboardPage> {
       final maxWeight = loaded[selected] ?? _defaultSiloMaxWeight;
       _settingsMaxWeightController.text = maxWeight.toStringAsFixed(1);
       _settingsMaxWeightError = _validateMaxWeight(_settingsMaxWeightController.text);
+      _settingsNoiseThresholdKg = loadedNoise[selected] ?? 5.0;
+      _noiseThresholdKg = loadedNoise[_getActiveSiloId()] ?? 5.0;
     });
   }
 
   double _getSiloMaxWeight(int siloId) {
     return _siloMaxConfig[siloId] ?? _defaultSiloMaxWeight;
+  }
+
+  int _getActiveSiloId() {
+    if (_silos.isEmpty) return 1;
+    return _extractSiloId(_silos.first.id, fallback: 1);
   }
 
   List<int> _getSettingsSiloIds() {
@@ -300,6 +336,7 @@ class _DashboardPageState extends State<DashboardPage> {
         _selectedSettingsSiloId = null;
         _settingsMaxWeightController.text = '';
         _settingsMaxWeightError = null;
+        _settingsNoiseThresholdKg = 5.0;
       });
       return;
     }
@@ -308,11 +345,14 @@ class _DashboardPageState extends State<DashboardPage> {
         ? _selectedSettingsSiloId!
         : ids.first;
     final maxWeight = await loadSiloConfig(siloId);
+    final noiseThreshold = await loadSiloNoiseConfig(siloId);
     if (!mounted) return;
     setState(() {
       _selectedSettingsSiloId = siloId;
       _settingsMaxWeightController.text = maxWeight.toStringAsFixed(1);
       _settingsMaxWeightError = _validateMaxWeight(_settingsMaxWeightController.text);
+      _settingsNoiseThresholdKg = noiseThreshold;
+      _noiseThresholdKg = _siloNoiseThresholdConfig[_getActiveSiloId()] ?? 5.0;
     });
   }
 
@@ -1281,62 +1321,6 @@ class _DashboardPageState extends State<DashboardPage> {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: isMobile
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.blue.shade900,
-                            ),
-                          ),
-                          Slider(
-                            value: _noiseThresholdKg,
-                            min: 1,
-                            max: 100,
-                            divisions: 99,
-                            label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                            onChanged: (value) {
-                              setState(() {
-                                _noiseThresholdKg = value;
-                              });
-                            },
-                          ),
-                        ],
-                      )
-                    : Row(
-                        children: [
-                          Text(
-                            'Ngưỡng nhiễu: ${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.blue.shade900,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Slider(
-                              value: _noiseThresholdKg,
-                              min: 1,
-                              max: 100,
-                              divisions: 99,
-                              label: '${_noiseThresholdKg.toStringAsFixed(0)} kg',
-                              onChanged: (value) {
-                                setState(() {
-                                  _noiseThresholdKg = value;
-                                });
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
               ScrollConfiguration(
                 behavior: const MaterialScrollBehavior().copyWith(
                   dragDevices: {
@@ -1688,6 +1672,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       });
 
                       final loadedMax = await loadSiloConfig(value);
+                      final loadedNoise = await loadSiloNoiseConfig(value);
                       if (!mounted) return;
 
                       setState(() {
@@ -1695,6 +1680,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         _settingsMaxWeightError = _validateMaxWeight(
                           _settingsMaxWeightController.text,
                         );
+                        _settingsNoiseThresholdKg = loadedNoise;
                       });
                     },
               decoration: const InputDecoration(
@@ -1727,6 +1713,48 @@ class _DashboardPageState extends State<DashboardPage> {
               },
             ),
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.blue.shade100),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                  Slider(
+                    value: _settingsNoiseThresholdKg,
+                    min: 0,
+                    max: 100,
+                    divisions: 100,
+                    label: '${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                    onChanged: (value) {
+                      setState(() {
+                        _settingsNoiseThresholdKg = value;
+                        if (_selectedSettingsSiloId == _getActiveSiloId()) {
+                          _noiseThresholdKg = value;
+                        }
+                      });
+                    },
+                    onChangeEnd: (value) async {
+                      final siloId = _selectedSettingsSiloId;
+                      if (siloId == null) return;
+                      await saveSiloNoiseConfig(siloId, value);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
               child: ElevatedButton.icon(
@@ -1754,9 +1782,14 @@ class _DashboardPageState extends State<DashboardPage> {
                   }
 
                   await saveSiloConfig(siloId, maxWeight);
+                  await saveSiloNoiseConfig(siloId, _settingsNoiseThresholdKg);
                   if (!mounted) return;
                   messenger.showSnackBar(
-                    SnackBar(content: Text('Đã lưu cấu hình Silo $siloId: ${maxWeight.toStringAsFixed(1)} kg')),
+                    SnackBar(
+                      content: Text(
+                        'Đã lưu Silo $siloId | Cân Max: ${maxWeight.toStringAsFixed(1)} kg | Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                      ),
+                    ),
                   );
                 },
                 icon: const Icon(Icons.save),
