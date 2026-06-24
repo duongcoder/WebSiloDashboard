@@ -7,6 +7,8 @@ enum _TrendDirection { up, down, flat }
 class CompressedStatisticsReportItem {
   final SiloHistoryModel milestone;
   final SiloHistoryModel? previousMilestone;
+  final double weightBefore;
+  final double weightAfter;
   final String weightChangeText;
   final String timeRangeText;
   final String detailText;
@@ -14,6 +16,8 @@ class CompressedStatisticsReportItem {
   const CompressedStatisticsReportItem({
     required this.milestone,
     required this.previousMilestone,
+    required this.weightBefore,
+    required this.weightAfter,
     required this.weightChangeText,
     required this.timeRangeText,
     required this.detailText,
@@ -158,6 +162,8 @@ CompressedStatisticsReportItem _buildReportItem({
     return CompressedStatisticsReportItem(
       milestone: milestone,
       previousMilestone: previous,
+      weightBefore: previous?.weightNow ?? milestone.weightNow,
+      weightAfter: milestone.weightNow,
       weightChangeText: weightChangeText,
       timeRangeText: timeRangeText,
       detailText: detailText,
@@ -166,6 +172,8 @@ CompressedStatisticsReportItem _buildReportItem({
     return CompressedStatisticsReportItem(
       milestone: milestone,
       previousMilestone: previous,
+      weightBefore: 0,
+      weightAfter: 0,
       weightChangeText: '0 kg',
       timeRangeText: 'Từ --:--:-- đến --:--:-- - --/--/----',
       detailText: 'Khối lượng không đổi trong 0 phút',

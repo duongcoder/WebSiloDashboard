@@ -90,6 +90,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final Map<int, double> _siloNoiseThresholdConfig = <int, double>{};
   final Map<int, double> _siloMaxConfig = <int, double>{};
   int? _selectedSettingsSiloId;
+  int? _selectedStatisticsSiloId;
   String? _settingsMaxWeightError;
   double _settingsNoiseThresholdKg = 5.0;
   final TextEditingController _settingsMaxWeightController =
@@ -622,8 +623,48 @@ class _DashboardPageState extends State<DashboardPage> {
     return optimized;
   }
 
+  List<int> _getStatisticsSiloIds() {
+    final ids = <int>{};
+
+    for (var i = 0; i < _silos.length; i++) {
+      final id = _extractSiloId(_silos[i].id, fallback: i + 1);
+      if (id > 0) {
+        ids.add(id);
+      }
+    }
+
+    for (final row in _siloHistory) {
+      if (row.idScale > 0) {
+        ids.add(row.idScale);
+      }
+    }
+
+    final list = ids.toList()..sort();
+    return list;
+  }
+
+  int? _getEffectiveStatisticsSiloId() {
+    final selected = _selectedStatisticsSiloId;
+    if (selected == null) return null;
+
+    final ids = _getStatisticsSiloIds();
+    if (ids.contains(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  List<SiloHistoryModel> _buildStatisticsHistorySource() {
+    final selectedSiloId = _getEffectiveStatisticsSiloId();
+    if (selectedSiloId == null) {
+      return _siloHistory;
+    }
+
+    return _siloHistory.where((row) => row.idScale == selectedSiloId).toList();
+  }
+
   List<Map<String, String>> _buildReportExportRows() {
-    final compressed = generateCompressedStatisticsReport(_siloHistory);
+    final compressed = generateCompressedStatisticsReport(_buildStatisticsHistorySource());
     final visibleRows = compressed.reversed.take(10).toList();
 
     final exportRows = <Map<String, String>>[];
@@ -1442,7 +1483,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildStatisticsReportCard() {
-    final rows = generateCompressedStatisticsReport(_siloHistory)
+    final statisticsSiloIds = _getStatisticsSiloIds();
+    final selectedStatisticsSiloId = _getEffectiveStatisticsSiloId();
+    final sourceHistory = _buildStatisticsHistorySource();
+    final rows = generateCompressedStatisticsReport(sourceHistory)
         .reversed
         .take(20)
         .toList();
@@ -1465,12 +1509,49 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Row(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Expanded(
-                      child: Text(
+                    SizedBox(
+                      width: isMobile ? constraints.maxWidth : 200,
+                      child: const Text(
                         'Báo cáo thống kê',
-                        style: TextStyle(fontWeight: FontWeight.w700),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                      ),
+                    ),
+                    SizedBox(
+                      width: isMobile ? constraints.maxWidth : 220,
+                      child: DropdownButtonFormField<int?>(
+                        initialValue: selectedStatisticsSiloId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Lọc Silo',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 10,
+                          ),
+                        ),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('Tổng các Silo'),
+                          ),
+                          ...statisticsSiloIds.map(
+                            (id) => DropdownMenuItem<int?>(
+                              value: id,
+                              child: Text('Silo $id'),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedStatisticsSiloId = value;
+                          });
+                        },
                       ),
                     ),
                     OutlinedButton.icon(
@@ -1514,6 +1595,8 @@ class _DashboardPageState extends State<DashboardPage> {
                           const DataColumn(label: Text('STT')),
                           if (!isMobile) const DataColumn(label: Text('ID Cân')),
                           const DataColumn(label: Text('Số cân')),
+                          const DataColumn(label: Text('Khối lượng trước')),
+                          const DataColumn(label: Text('Khối lượng sau')),
                           const DataColumn(label: Text('Thời gian')),
                           const DataColumn(label: Text('Chi tiết')),
                         ],
@@ -1549,6 +1632,22 @@ class _DashboardPageState extends State<DashboardPage> {
                                   ),
                                   DataCell(
                                     SizedBox(
+                                      width: 120,
+                                      child: Text(
+                                        '${item.weightBefore.toStringAsFixed(0)} kg',
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    SizedBox(
+                                      width: 120,
+                                      child: Text(
+                                        '${item.weightAfter.toStringAsFixed(0)} kg',
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(
+                                    SizedBox(
                                       width: isMobile ? 220 : 240,
                                       child: Text(
                                         item.timeRangeText,
@@ -1578,6 +1677,8 @@ class _DashboardPageState extends State<DashboardPage> {
                                     if (!isMobile)
                                       const DataCell(SizedBox(width: 90, child: Text('-'))),
                                     const DataCell(SizedBox(width: 90, child: Text('0 kg'))),
+                                    const DataCell(SizedBox(width: 120, child: Text('-'))),
+                                    const DataCell(SizedBox(width: 120, child: Text('-'))),
                                     DataCell(
                                       SizedBox(
                                         width: isMobile ? 220 : 240,
