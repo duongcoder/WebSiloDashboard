@@ -1266,6 +1266,9 @@ class _DashboardPageState extends State<DashboardPage> {
     final selectedPumpPlanSiloId = _getEffectivePumpPlanSiloId(rows);
     final filteredRows = _getFilteredPumpPlanRows(rows);
     final visibleRows = filteredRows.take(10).toList();
+    final planTitleText = selectedPumpPlanSiloId == null
+        ? '$title tổng'
+        : '$title silo $selectedPumpPlanSiloId';
 
     return Card(
       elevation: 4,
@@ -1279,173 +1282,174 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Expanded(
-                      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        alignment: WrapAlignment.end,
+                    SizedBox(
+                      width: isMobile ? constraints.maxWidth : 360,
+                      child: Row(
                         children: [
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              final result = await exportPlanRowsToExcel(
-                                filePrefix: exportFilePrefix,
-                                rows: filteredRows,
-                              );
-
-                              if (!mounted) return;
-
-                              messenger.showSnackBar(
-                                SnackBar(content: Text(result.message)),
-                              );
-                            },
-                            icon: const Icon(Icons.table_view),
-                            label: const Text('Xuất excel'),
-                          ),
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              final messenger = ScaffoldMessenger.of(context);
-                              final result = await showDialog<Map<String, String>>(
-                                context: context,
-                                builder: (dialogContext) {
-                                  final timeController = TextEditingController();
-                                  final siloController = TextEditingController();
-                                  final materialController = TextEditingController();
-                                  final qtyController = TextEditingController();
-                                  final statusController = TextEditingController(text: 'Chờ');
-
-                                  return AlertDialog(
-                                    title: const Text('Thêm kế hoạch'),
-                                    content: SingleChildScrollView(
-                                      child: Column(
-                                        children: [
-                                          TextField(
-                                            controller: timeController,
-                                            decoration: const InputDecoration(labelText: 'Thời gian'),
-                                          ),
-                                          TextField(
-                                            controller: siloController,
-                                            decoration: const InputDecoration(labelText: 'Silo'),
-                                          ),
-                                          TextField(
-                                            controller: materialController,
-                                            decoration: const InputDecoration(labelText: 'Nguyên liệu'),
-                                          ),
-                                          TextField(
-                                            controller: qtyController,
-                                            keyboardType: TextInputType.number,
-                                            decoration: const InputDecoration(labelText: 'Số lượng'),
-                                          ),
-                                          TextField(
-                                            controller: statusController,
-                                            decoration: const InputDecoration(labelText: 'Trạng thái'),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.of(dialogContext).pop(),
-                                        child: const Text('Hủy'),
-                                      ),
-                                      ElevatedButton(
-                                        onPressed: () {
-                                          Navigator.of(dialogContext).pop({
-                                            'time': timeController.text.trim(),
-                                            'silo': siloController.text.trim(),
-                                            'material': materialController.text.trim(),
-                                            'qty': qtyController.text.trim(),
-                                            'status': statusController.text.trim(),
-                                          });
-                                        },
-                                        child: const Text('Thêm'),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              );
-
-                              if (result == null) return;
-                              if (!mounted) return;
-
-                              final time = result['time'] ?? '';
-                              final silo = result['silo'] ?? '';
-                              final material = result['material'] ?? '';
-                              final qty = result['qty'] ?? '';
-                              final status = result['status'] ?? '';
-
-                              if (time.isEmpty ||
-                                  silo.isEmpty ||
-                                  material.isEmpty ||
-                                  qty.isEmpty ||
-                                  status.isEmpty) {
-                                messenger.showSnackBar(
-                                  const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
-                                );
-                                return;
-                              }
-
-                              setState(() {
-                                rows.add({
-                                  'time': time,
-                                  'silo': silo,
-                                  'material': material,
-                                  'qty': qty,
-                                  'status': status,
-                                });
-                              });
-
-                              messenger.showSnackBar(
-                                SnackBar(content: Text(addSnackBarText)),
-                              );
-                            },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Thêm kế hoạch'),
-                          ),
-                          SizedBox(
-                            width: isMobile ? constraints.maxWidth : 220,
-                            child: DropdownButtonFormField<int?>(
-                              initialValue: selectedPumpPlanSiloId,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Lọc Silo',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                              items: [
-                                const DropdownMenuItem<int?>(
-                                  value: null,
-                                  child: Text('Tổng các Silo'),
-                                ),
-                                ...pumpSiloIds.map(
-                                  (id) => DropdownMenuItem<int?>(
-                                    value: id,
-                                    child: Text('Silo $id'),
-                                  ),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedPumpPlanSiloId = value;
-                                });
-                              },
+                          Expanded(
+                            child: Text(
+                              planTitleText,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                             ),
                           ),
-                          _buildInfoBadge('Hiển thị: ${visibleRows.length}'),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade100),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int?>(
+                                value: selectedPumpPlanSiloId,
+                                isDense: true,
+                                items: [
+                                  const DropdownMenuItem<int?>(
+                                    value: null,
+                                    child: Text('Tổng các Silo'),
+                                  ),
+                                  ...pumpSiloIds.map(
+                                    (id) => DropdownMenuItem<int?>(
+                                      value: id,
+                                      child: Text('Silo $id'),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedPumpPlanSiloId = value;
+                                  });
+                                },
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final result = await exportPlanRowsToExcel(
+                          filePrefix: exportFilePrefix,
+                          rows: filteredRows,
+                        );
+
+                        if (!mounted) return;
+
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(result.message)),
+                        );
+                      },
+                      icon: const Icon(Icons.table_view),
+                      label: const Text('Xuất excel'),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final result = await showDialog<Map<String, String>>(
+                          context: context,
+                          builder: (dialogContext) {
+                            final timeController = TextEditingController();
+                            final siloController = TextEditingController();
+                            final materialController = TextEditingController();
+                            final qtyController = TextEditingController();
+                            final statusController = TextEditingController(text: 'Chờ');
+
+                            return AlertDialog(
+                              title: const Text('Thêm kế hoạch'),
+                              content: SingleChildScrollView(
+                                child: Column(
+                                  children: [
+                                    TextField(
+                                      controller: timeController,
+                                      decoration: const InputDecoration(labelText: 'Thời gian'),
+                                    ),
+                                    TextField(
+                                      controller: siloController,
+                                      decoration: const InputDecoration(labelText: 'Silo'),
+                                    ),
+                                    TextField(
+                                      controller: materialController,
+                                      decoration: const InputDecoration(labelText: 'Nguyên liệu'),
+                                    ),
+                                    TextField(
+                                      controller: qtyController,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(labelText: 'Số lượng'),
+                                    ),
+                                    TextField(
+                                      controller: statusController,
+                                      decoration: const InputDecoration(labelText: 'Trạng thái'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(dialogContext).pop(),
+                                  child: const Text('Hủy'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.of(dialogContext).pop({
+                                      'time': timeController.text.trim(),
+                                      'silo': siloController.text.trim(),
+                                      'material': materialController.text.trim(),
+                                      'qty': qtyController.text.trim(),
+                                      'status': statusController.text.trim(),
+                                    });
+                                  },
+                                  child: const Text('Thêm'),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+
+                        if (result == null) return;
+                        if (!mounted) return;
+
+                        final time = result['time'] ?? '';
+                        final silo = result['silo'] ?? '';
+                        final material = result['material'] ?? '';
+                        final qty = result['qty'] ?? '';
+                        final status = result['status'] ?? '';
+
+                        if (time.isEmpty ||
+                            silo.isEmpty ||
+                            material.isEmpty ||
+                            qty.isEmpty ||
+                            status.isEmpty) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
+                          );
+                          return;
+                        }
+
+                        setState(() {
+                          rows.add({
+                            'time': time,
+                            'silo': silo,
+                            'material': material,
+                            'qty': qty,
+                            'status': status,
+                          });
+                        });
+
+                        messenger.showSnackBar(
+                          SnackBar(content: Text(addSnackBarText)),
+                        );
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Thêm kế hoạch'),
+                    ),
+                    _buildInfoBadge('Hiển thị: ${visibleRows.length}'),
                   ],
                 ),
               ),
@@ -1583,6 +1587,9 @@ class _DashboardPageState extends State<DashboardPage> {
         .reversed
         .take(20)
         .toList();
+    final reportTitleText = selectedStatisticsSiloId == null
+      ? 'Báo cáo thống kê tổng'
+      : 'Báo cáo thống kê silo $selectedStatisticsSiloId';
 
     Color changeColor(String change) {
       if (change.startsWith('+')) return Colors.green;
@@ -1608,43 +1615,48 @@ class _DashboardPageState extends State<DashboardPage> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     SizedBox(
-                      width: isMobile ? constraints.maxWidth : 200,
-                      child: const Text(
-                        'Báo cáo thống kê',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                      ),
-                    ),
-                    SizedBox(
-                      width: isMobile ? constraints.maxWidth : 220,
-                      child: DropdownButtonFormField<int?>(
-                        initialValue: selectedStatisticsSiloId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Lọc Silo',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 10,
+                      width: isMobile ? constraints.maxWidth : 380,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              reportTitleText,
+                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                            ),
                           ),
-                        ),
-                        items: [
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text('Tổng các Silo'),
-                          ),
-                          ...statisticsSiloIds.map(
-                            (id) => DropdownMenuItem<int?>(
-                              value: id,
-                              child: Text('Silo $id'),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade100),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int?>(
+                                value: selectedStatisticsSiloId,
+                                isDense: true,
+                                items: [
+                                  const DropdownMenuItem<int?>(
+                                    value: null,
+                                    child: Text('Tổng các Silo'),
+                                  ),
+                                  ...statisticsSiloIds.map(
+                                    (id) => DropdownMenuItem<int?>(
+                                      value: id,
+                                      child: Text('Silo $id'),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedStatisticsSiloId = value;
+                                  });
+                                },
+                              ),
                             ),
                           ),
                         ],
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedStatisticsSiloId = value;
-                          });
-                        },
                       ),
                     ),
                     OutlinedButton.icon(
@@ -1803,13 +1815,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          padding: const EdgeInsets.only(left: 6, top: 8, bottom: 8),
-          child: const Text(
-            'Kế hoạch Bơm',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          ),
-        ),
         _buildPumpPlanCard(),
         const SizedBox(height: 12),
         _buildStatisticsReportCard(),
