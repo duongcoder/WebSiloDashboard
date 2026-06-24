@@ -90,6 +90,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final Map<int, double> _siloNoiseThresholdConfig = <int, double>{};
   final Map<int, double> _siloMaxConfig = <int, double>{};
   int? _selectedSettingsSiloId;
+  int? _selectedPumpPlanSiloId;
   int? _selectedStatisticsSiloId;
   String? _settingsMaxWeightError;
   double _settingsNoiseThresholdKg = 5.0;
@@ -250,6 +251,16 @@ class _DashboardPageState extends State<DashboardPage> {
     if (parsed != null && parsed > 0) return parsed;
 
     return fallback ?? 1;
+  }
+
+  int? _tryExtractPositiveInt(String text) {
+    final direct = int.tryParse(text.trim());
+    if (direct != null && direct > 0) return direct;
+
+    final extracted = RegExp(r'\d+').firstMatch(text)?.group(0);
+    final parsed = int.tryParse(extracted ?? '');
+    if (parsed != null && parsed > 0) return parsed;
+    return null;
   }
 
   Future<void> _loadAllSiloConfigs(List<Silo> silos) async {
@@ -661,6 +672,44 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return _siloHistory.where((row) => row.idScale == selectedSiloId).toList();
+  }
+
+  List<int> _getPumpPlanSiloIds(List<Map<String, String>> rows) {
+    final ids = <int>{};
+
+    for (final row in rows) {
+      final siloText = (row['silo'] ?? '').trim();
+      final id = _tryExtractPositiveInt(siloText);
+      if (id != null) {
+        ids.add(id);
+      }
+    }
+
+    final list = ids.toList()..sort();
+    return list;
+  }
+
+  int? _getEffectivePumpPlanSiloId(List<Map<String, String>> rows) {
+    final selected = _selectedPumpPlanSiloId;
+    if (selected == null) return null;
+
+    final ids = _getPumpPlanSiloIds(rows);
+    if (ids.contains(selected)) {
+      return selected;
+    }
+    return null;
+  }
+
+  List<Map<String, String>> _getFilteredPumpPlanRows(List<Map<String, String>> rows) {
+    final selectedSiloId = _getEffectivePumpPlanSiloId(rows);
+    if (selectedSiloId == null) {
+      return rows;
+    }
+
+    return rows.where((row) {
+      final siloText = (row['silo'] ?? '').trim();
+      return _tryExtractPositiveInt(siloText) == selectedSiloId;
+    }).toList();
   }
 
   List<Map<String, String>> _buildReportExportRows() {
@@ -1213,6 +1262,11 @@ class _DashboardPageState extends State<DashboardPage> {
     required String deleteSnackBarText,
     required String exportFilePrefix,
   }) {
+    final pumpSiloIds = _getPumpPlanSiloIds(rows);
+    final selectedPumpPlanSiloId = _getEffectivePumpPlanSiloId(rows);
+    final filteredRows = _getFilteredPumpPlanRows(rows);
+    final visibleRows = filteredRows.take(10).toList();
+
     return Card(
       elevation: 4,
       margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
@@ -1243,7 +1297,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               final messenger = ScaffoldMessenger.of(context);
                               final result = await exportPlanRowsToExcel(
                                 filePrefix: exportFilePrefix,
-                                rows: rows,
+                                rows: filteredRows,
                               );
 
                               if (!mounted) return;
@@ -1355,7 +1409,40 @@ class _DashboardPageState extends State<DashboardPage> {
                             icon: const Icon(Icons.add),
                             label: const Text('Thêm kế hoạch'),
                           ),
-                          _buildInfoBadge('Hiển thị: ${rows.length}'),
+                          SizedBox(
+                            width: isMobile ? constraints.maxWidth : 220,
+                            child: DropdownButtonFormField<int?>(
+                              initialValue: selectedPumpPlanSiloId,
+                              isExpanded: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Lọc Silo',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text('Tổng các Silo'),
+                                ),
+                                ...pumpSiloIds.map(
+                                  (id) => DropdownMenuItem<int?>(
+                                    value: id,
+                                    child: Text('Silo $id'),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  _selectedPumpPlanSiloId = value;
+                                });
+                              },
+                            ),
+                          ),
+                          _buildInfoBadge('Hiển thị: ${visibleRows.length}'),
                         ],
                       ),
                     ),
@@ -1388,19 +1475,36 @@ class _DashboardPageState extends State<DashboardPage> {
                         columnSpacing: _tableColumnSpacing(isMobile),
                         horizontalMargin: _tableHorizontalMargin(isMobile),
                         columns: [
+                          const DataColumn(label: Text('STT')),
+                          const DataColumn(label: Text('Tên silo')),
                           const DataColumn(label: Text('Thời gian')),
-                          if (!isMobile) const DataColumn(label: Text('Silo')),
                           if (!isMobile) const DataColumn(label: Text('Nguyên liệu')),
                           const DataColumn(label: Text('Số lượng'), numeric: true),
                           const DataColumn(label: Text('Trạng thái')),
                           const DataColumn(label: Text('Xóa')),
                         ],
-                        rows: List<DataRow>.generate(rows.length, (index) {
-                          final row = rows[index];
+                        rows: List<DataRow>.generate(visibleRows.length, (index) {
+                          final row = visibleRows[index];
                           final status = row['status'] ?? '';
 
                           return DataRow(
                             cells: [
+                              DataCell(
+                                SizedBox(
+                                  width: 56,
+                                  child: Text('${index + 1}'),
+                                ),
+                              ),
+                              DataCell(
+                                SizedBox(
+                                  width: 90,
+                                  child: Text(
+                                    row['silo'] ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
                               DataCell(
                                 SizedBox(
                                   width: isMobile ? 220 : 240,
@@ -1411,17 +1515,6 @@ class _DashboardPageState extends State<DashboardPage> {
                                   ),
                                 ),
                               ),
-                              if (!isMobile)
-                                DataCell(
-                                  SizedBox(
-                                    width: 90,
-                                    child: Text(
-                                      row['silo'] ?? '',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
                               if (!isMobile)
                                 DataCell(
                                   SizedBox(
@@ -1448,7 +1541,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                     icon: const Icon(Icons.delete_forever, color: Colors.red),
                                     onPressed: () {
                                       setState(() {
-                                        rows.removeAt(index);
+                                        rows.remove(row);
                                       });
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(content: Text(deleteSnackBarText)),
