@@ -8,7 +8,9 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:signalr_core/signalr_core.dart';
+import 'package:signalr_core/signalr_core.dart' as signalr_core;
+
+
 
 import 'config/app_config.dart';
 import 'models/controller.dart';
@@ -20,6 +22,8 @@ import 'services/excel_export_service.dart';
 import 'services/silo_api_service.dart';
 import 'services/statistics_report_helper.dart';
 import 'services/sql_service.dart';
+import 'screens/login_screen.dart';
+import 'services/auth_service.dart';
 import 'widgets/silo_module.dart';
 
 void main() {
@@ -43,7 +47,18 @@ class SiloDashboardApp extends StatelessWidget {
           Breakpoint(start: 1921, end: double.infinity, name: '4K'),
         ],
       ),
-      home: const DashboardPage(),
+      home: FutureBuilder<bool>(
+        future: AuthService().hasToken(),
+        builder: (context, snapshot) {
+          final hasToken = snapshot.data ?? false;
+if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return hasToken ? const DashboardPage() : const LoginScreen();
+        },
+      ),
     );
   }
 }
@@ -69,7 +84,8 @@ class _DashboardPageState extends State<DashboardPage> {
   };
 
   int _selectedIndex = -1;
-  late HubConnection hubConnection;
+late signalr_core.HubConnection hubConnection;
+  // (kept as signalr_core.HubConnection)
   double? _currentWeight;
   String _selectedTimeframe = '24h';
   bool _isInitialLoading = true;
@@ -477,7 +493,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _initSignalR() async {
     try {
-      hubConnection = HubConnectionBuilder()
+hubConnection = signalr_core.HubConnectionBuilder()
           .withUrl(AppConfig.signalRHubUrl)
           .build();
 

@@ -80,6 +80,24 @@ namespace Backend
 
             app.UseRouting();
             
+            // ====================================================================
+            // ▼ CHÈN THÊM ĐOẠN NÀY ĐỂ ĐẬP TAN LỖI CORS PREFLIGHT (OPTIONS) ▼
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Method == "OPTIONS")
+                {
+                    // Tự động lấy Origin của Flutter Web gửi lên để map ngược lại (vượt qua bộ lọc Credentials)
+                    context.Response.Headers["Access-Control-Allow-Origin"] = context.Request.Headers["Origin"].ToString();
+                    context.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, X-Requested-With";
+                    context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+                    context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+                    context.Response.StatusCode = 200;
+                    return; // Trả về luôn, không cho đi tiếp xuống các tầng dưới gây lỗi
+                }
+                await next();
+            });
+            // ▲ ==================================================================== ▲
+
             // CORS đặt cố định tại đây
             app.UseCors("AllowAll");
             

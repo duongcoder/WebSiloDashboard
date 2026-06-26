@@ -1,15 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+
 import '../models/silo_history_model.dart';
 
+// lấy origin động khi release (production), còn debug dùng IP cố định
+String get baseUrl {
+  if (!kReleaseMode) {
+    return 'http://14.232.245.56:8089';
+  }
+  return Uri.base.origin;
+}
+
+
+
+
 class SiloApiService {
-  static const String _directHistoryUrl =
-      'http://14.232.245.56:8089/api/Scales/GetHistory';
+  // Debug: IP cố định; Release: origin động (đúng IP/Domain máy khách)
+  static String get _directHistoryUrl => '$baseUrl/api/Scales/GetHistory';
+
+
 
   final Duration pollingInterval;
   final http.Client _httpClient;
