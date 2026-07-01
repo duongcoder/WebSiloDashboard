@@ -71,7 +71,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  static const int _settingsTabIndex = 7;
+  static const int _settingsTabIndex = 6;
   static const double _defaultSiloMaxWeight = 100.0;
   static const Map<String, Duration> _timeframeDurations = {
     '1ph': Duration(minutes: 1),
@@ -931,7 +931,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
       {'icon': Icons.history, 'label': 'Lịch sử'},
       {'icon': Icons.warning_amber_rounded, 'label': 'Cảnh báo'},
       {'icon': Icons.description, 'label': 'Báo cáo'},
-      {'icon': Icons.devices_other, 'label': 'Thiết bị'},
       {'icon': Icons.settings_applications, 'label': 'Cài đặt'},
       {'icon': Icons.group, 'label': 'Quản lý người dùng'},
     ];
