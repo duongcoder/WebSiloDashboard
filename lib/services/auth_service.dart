@@ -81,10 +81,41 @@ class AuthService {
     }
   }
 
-  Future<void> logout() async {
+  // Logout endpoint dùng đường dẫn tương đối bắt đầu bằng /api/
+  // (baseUrl chỉ dùng để gom domain; không hardcode port/IP)
+  Future<bool> logout() async {
+    final uri = Uri.parse('$baseUrl/api/Auth/Logout');
+
+    try {
+      final token = await getToken();
+
+      // Nếu có token thì gửi lên để server có thể blacklist/thu hồi nếu cần.
+      // Nếu hệ thống chỉ "pure JWT" thì server vẫn trả về Success.
+      final res = await _client.post(
+        uri,
+        headers: const {
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: jsonEncode({
+          'token': token,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_prefsKey);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Lỗi kết nối API Logout: $e');
+    }
+
+    // Fallback: vẫn xóa token local để user thoát được.
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
+    return false;
   }
+
 
   void dispose() {
     _client.close();

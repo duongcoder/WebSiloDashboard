@@ -37,6 +37,20 @@ namespace SiloDashboardProxy.Controllers
                 Message = "Tài khoản hoặc mật khẩu không chính xác!" 
             });
         }
+
+        // Logout: với hệ thống JWT "pure" (không refresh token)
+        // thì server chỉ cần trả về trạng thái thành công.
+        // Nếu bạn sau này thêm refresh token/blacklist thì logic có thể mở rộng ở đây.
+        [HttpPost("Logout")]
+        public IActionResult Logout([FromBody] AuthLogoutRequest request)
+        {
+            return Ok(new AuthLogoutResponse
+            {
+                Success = true,
+                Message = "Đăng xuất thành công"
+            });
+        }
+
     }
 
     public class LoginRequest
@@ -51,4 +65,18 @@ namespace SiloDashboardProxy.Controllers
         public string Token { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
     }
+
+    public class AuthLogoutRequest
+    {
+        // Có thể bỏ nếu bạn không cần gửi token.
+        // Để tương lai (blacklist/refresh token) thì giữ lại.
+        public string? Token { get; set; }
+    }
+
+    public class AuthLogoutResponse
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
 }
+
