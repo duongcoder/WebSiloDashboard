@@ -2129,29 +2129,62 @@ hubConnection = signalr_core.HubConnectionBuilder()
                     children: [
                       const Icon(Icons.notifications, color: Colors.black54, size: 32),
                       const SizedBox(width: 22),
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.blue.shade700,
-                        ),
-                        child: const Icon(Icons.person, color: Colors.white, size: 22),
-                      ),
-                      const SizedBox(width: 12),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Admin',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                          Text(
-                            'Quản trị hệ thống',
-                            style: TextStyle(fontSize: 12, color: Colors.black54),
+                      PopupMenuButton<String>(
+                        tooltip: 'Tài khoản',
+                        onSelected: (value) async {
+                          if (value != 'logout') return;
+
+                          final authService = AuthService();
+                          await authService.logout();
+
+                          if (!mounted) return;
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (_) => const LoginScreen(),
+                            ),
+                            (route) => false,
+                          );
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem<String>(
+                            value: 'logout',
+                            child: Row(
+                              children: [
+                                Icon(Icons.logout, size: 18),
+                                SizedBox(width: 8),
+                                Text('Đăng xuất'),
+                              ],
+                            ),
                           ),
                         ],
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.blue.shade700,
+                              ),
+                              child: const Icon(Icons.person, color: Colors.white, size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Admin',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                Text(
+                                  'Quản trị hệ thống',
+                                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),

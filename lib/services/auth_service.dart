@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -82,38 +83,29 @@ class AuthService {
   }
 
   // Logout endpoint dùng đường dẫn tương đối bắt đầu bằng /api/
-  // (baseUrl chỉ dùng để gom domain; không hardcode port/IP)
-  Future<bool> logout() async {
-    final uri = Uri.parse('$baseUrl/api/Auth/Logout');
-
+  // để tương thích IIS Reverse Proxy (ARR).
+  Future<void> logout() async {
     try {
       final token = await getToken();
+      final dio = Dio();
 
-      // Nếu có token thì gửi lên để server có thể blacklist/thu hồi nếu cần.
-      // Nếu hệ thống chỉ "pure JWT" thì server vẫn trả về Success.
-      final res = await _client.post(
-        uri,
-        headers: const {
-          'Content-Type': 'application/json; charset=utf-8',
-        },
-        body: jsonEncode({
+      await dio.post(
+        '/api/Auth/Logout',
+        options: Options(
+          headers: const {
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+        ),
+        data: {
           'token': token,
-        }),
+        },
       );
-
-      if (res.statusCode == 200) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove(_prefsKey);
-        return true;
-      }
     } catch (e) {
       debugPrint('Lỗi kết nối API Logout: $e');
+    } finally {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_prefsKey);
     }
-
-    // Fallback: vẫn xóa token local để user thoát được.
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefsKey);
-    return false;
   }
 
 

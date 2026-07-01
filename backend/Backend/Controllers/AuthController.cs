@@ -42,13 +42,18 @@ namespace SiloDashboardProxy.Controllers
         // thì server chỉ cần trả về trạng thái thành công.
         // Nếu bạn sau này thêm refresh token/blacklist thì logic có thể mở rộng ở đây.
         [HttpPost("Logout")]
-        public IActionResult Logout([FromBody] AuthLogoutRequest request)
+        public IActionResult Logout()
         {
-            return Ok(new AuthLogoutResponse
+            // Xóa session nếu có bật Session middleware.
+            HttpContext.Session?.Clear();
+
+            // Xóa cookie phía server theo kiểu best-effort.
+            foreach (var cookieKey in Request.Cookies.Keys)
             {
-                Success = true,
-                Message = "Đăng xuất thành công"
-            });
+                Response.Cookies.Delete(cookieKey);
+            }
+
+            return Ok();
         }
 
     }
