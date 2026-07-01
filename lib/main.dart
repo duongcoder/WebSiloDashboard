@@ -794,11 +794,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
     }
   }
 
-  void _select(int index, String label) {
+  void _select(int index) {
     setState(() {
       _selectedIndex = index;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(label)));
   }
 
   Color _statusColor(String status) {
@@ -950,7 +949,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
           index: i,
           selectedIndex: _selectedIndex,
           onTap: () {
-            _select(i, item['label'] as String);
+            _select(i);
             if (closeDrawerAfterTap) {
               Navigator.of(context).maybePop();
             }
