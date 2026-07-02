@@ -24,6 +24,7 @@ import 'services/statistics_report_helper.dart';
 import 'services/sql_service.dart';
 import 'screens/login_screen.dart';
 import 'services/auth_service.dart';
+import 'widgets/silo_report_table.dart';
 import 'widgets/silo_module.dart';
 
 void main() {
@@ -71,6 +72,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const int _reportTabIndex = 5;
   static const int _settingsTabIndex = 6;
   static const int _userManagementTabIndex = 7;
   static const double _defaultSiloMaxWeight = 100.0;
@@ -1307,6 +1309,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       {'icon': Icons.settings_applications, 'label': 'Cài đặt'},
     ];
 
+    // Chỉ giữ phân quyền admin cho menu quản lý người dùng.
     if (_isAdmin) {
       items.add({'icon': Icons.group, 'label': 'Quản lý người dùng'});
     }
@@ -1987,227 +1990,19 @@ hubConnection = signalr_core.HubConnectionBuilder()
         .reversed
         .take(20)
         .toList();
-    final reportTitleText = selectedStatisticsSiloId == null
-      ? 'Báo cáo thống kê tổng'
-      : 'Báo cáo thống kê silo $selectedStatisticsSiloId';
-
-    Color changeColor(String change) {
-      if (change.startsWith('+')) return Colors.green;
-      if (change.startsWith('-')) return Colors.red;
-      return Colors.black87;
-    }
-
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isMobile = constraints.maxWidth < 600;
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: isMobile ? constraints.maxWidth : 380,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              reportTitleText,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.shade100),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int?>(
-                                value: selectedStatisticsSiloId,
-                                isDense: true,
-                                items: [
-                                  const DropdownMenuItem<int?>(
-                                    value: null,
-                                    child: Text('Tổng các Silo'),
-                                  ),
-                                  ...statisticsSiloIds.map(
-                                    (id) => DropdownMenuItem<int?>(
-                                      value: id,
-                                      child: Text('Silo $id'),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedStatisticsSiloId = value;
-                                  });
-                                },
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        await _exportStatisticsReport(isAuto: false);
-                      },
-                      icon: const Icon(Icons.table_view),
-                      label: const Text('Xuất excel'),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildInfoBadge('Hiển thị: ${rows.length}'),
-                  ],
-                ),
-              ),
-              ScrollConfiguration(
-                behavior: const MaterialScrollBehavior().copyWith(
-                  dragDevices: {
-                    PointerDeviceKind.touch,
-                    PointerDeviceKind.mouse,
-                    PointerDeviceKind.trackpad,
-                    PointerDeviceKind.stylus,
-                    PointerDeviceKind.unknown,
-                  },
-                ),
-                child: Scrollbar(
-                  controller: _statisticsTableScrollController,
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _statisticsTableScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.resolveWith(
-                          (states) => Colors.blue.shade50,
-                        ),
-                        dataRowMinHeight: _tableRowMinHeight(isMobile),
-                        columnSpacing: _tableColumnSpacing(isMobile),
-                        horizontalMargin: _tableHorizontalMargin(isMobile),
-                        columns: [
-                          const DataColumn(label: Text('STT')),
-                          if (!isMobile) const DataColumn(label: Text('ID Cân')),
-                          const DataColumn(label: Text('Số cân')),
-                          const DataColumn(label: Text('Khối lượng trước')),
-                          const DataColumn(label: Text('Khối lượng sau')),
-                          const DataColumn(label: Text('Thời gian')),
-                          const DataColumn(label: Text('Chi tiết')),
-                        ],
-                        rows: rows.isNotEmpty
-                            ? List<DataRow>.generate(rows.length, (index) {
-                                final item = rows[index];
-
-                                final cells = <DataCell>[
-                                  DataCell(
-                                    SizedBox(
-                                      width: 56,
-                                      child: Text('${index + 1}'),
-                                    ),
-                                  ),
-                                  if (!isMobile)
-                                    DataCell(
-                                      SizedBox(
-                                        width: 90,
-                                        child: Text('${item.milestone.idScale}'),
-                                      ),
-                                    ),
-                                  DataCell(
-                                    SizedBox(
-                                      width: 90,
-                                      child: Text(
-                                        item.weightChangeText,
-                                        style: TextStyle(
-                                          color: changeColor(item.weightChangeText),
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    SizedBox(
-                                      width: 120,
-                                      child: Text(
-                                        '${item.weightBefore.toStringAsFixed(0)} kg',
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    SizedBox(
-                                      width: 120,
-                                      child: Text(
-                                        '${item.weightAfter.toStringAsFixed(0)} kg',
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    SizedBox(
-                                      width: isMobile ? 220 : 240,
-                                      child: Text(
-                                        item.timeRangeText,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                  DataCell(
-                                    SizedBox(
-                                      width: isMobile ? 220 : 420,
-                                      child: Text(
-                                        item.detailText,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ),
-                                ];
-
-                                return DataRow(cells: cells);
-                              })
-                            : [
-                                DataRow(
-                                  cells: [
-                                    const DataCell(SizedBox(width: 56, child: Text('-'))),
-                                    if (!isMobile)
-                                      const DataCell(SizedBox(width: 90, child: Text('-'))),
-                                    const DataCell(SizedBox(width: 90, child: Text('0 kg'))),
-                                    const DataCell(SizedBox(width: 120, child: Text('-'))),
-                                    const DataCell(SizedBox(width: 120, child: Text('-'))),
-                                    DataCell(
-                                      SizedBox(
-                                        width: isMobile ? 220 : 240,
-                                        child: const Text('Chưa có dữ liệu'),
-                                      ),
-                                    ),
-                                    DataCell(
-                                      SizedBox(
-                                        width: isMobile ? 220 : 420,
-                                        child: const Text('-'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+    return SiloReportTable(
+      statisticsSiloIds: statisticsSiloIds,
+      selectedStatisticsSiloId: selectedStatisticsSiloId,
+      rows: rows,
+      scrollController: _statisticsTableScrollController,
+      onStatisticsSiloChanged: (value) {
+        setState(() {
+          _selectedStatisticsSiloId = value;
+        });
+      },
+      onExportPressed: () async {
+        await _exportStatisticsReport(isAuto: false);
+      },
     );
   }
 
@@ -2217,6 +2012,15 @@ hubConnection = signalr_core.HubConnectionBuilder()
       children: [
         _buildPumpPlanCard(),
         const SizedBox(height: 12),
+        _buildStatisticsReportCard(),
+      ],
+    );
+  }
+
+  Widget _buildReportTabSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         _buildStatisticsReportCard(),
       ],
     );
@@ -2524,6 +2328,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
+    final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final horizontalPadding = maxWidth < 640 ? 10.0 : 16.0;
@@ -2550,17 +2355,19 @@ hubConnection = signalr_core.HubConnectionBuilder()
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showStats && !showSettings && !showUserManagement)
+                if (showStats && !showSettings && !showUserManagement && !showReportTab)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
                   ),
-                if (showStats && !showSettings && !showUserManagement)
+                if (showStats && !showSettings && !showUserManagement && !showReportTab)
                   const SizedBox(height: 16),
                 if (showSettings)
                   _buildSettingsConfigurationCard()
                 else if (showUserManagement)
                   _buildUserManagementCard()
+                else if (showReportTab)
+                  _buildReportTabSection()
                 else ...[
                   _buildModulesAndChartSection(maxWidth),
                   const SizedBox(height: 16),
@@ -2576,6 +2383,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final rightPanelWidth = (screenWidth * 0.30).clamp(420.0, 560.0);
@@ -2729,7 +2537,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!showSettings && !showUserManagement)
+                          if (!showSettings && !showUserManagement && !showReportTab)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: LayoutBuilder(
@@ -2749,6 +2557,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                 : showUserManagement
                                     ? SingleChildScrollView(
                                         child: _buildUserManagementCard(),
+                                      )
+                                : showReportTab
+                                    ? SingleChildScrollView(
+                                        child: _buildReportTabSection(),
                                       )
                                 : Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
