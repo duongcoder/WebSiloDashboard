@@ -1,4 +1,12 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Backend.Data;
+using Backend.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.EntityFrameworkCore;
 
 namespace SiloDashboardProxy.Controllers
 {
@@ -7,10 +15,12 @@ namespace SiloDashboardProxy.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IConfiguration _configuration;
+        private readonly SiloDbContext _db;
 
-        public AuthController(IConfiguration configuration)
+        public AuthController(IConfiguration configuration, SiloDbContext db)
         {
             _configuration = configuration;
+            _db = db;
         }
 
         [HttpPost("Login")]
@@ -20,13 +30,45 @@ namespace SiloDashboardProxy.Controllers
             var configUsername = _configuration["DbLogin:Username"];
             var configPassword = _configuration["DbLogin:Password"];
 
-            if (request.Username == configUsername && request.Password == configPassword)
+            var user = _db.Users.AsNoTracking().FirstOrDefault(u =>
+                u.Username == request.Username ||
+                (request.Username == configUsername && request.Password == configPassword && u.Username == configUsername));
+
+            if (user != null &&
+                (VerifyPassword(request.Password, user.PasswordHash) ||
+                 (request.Username == configUsername && request.Password == configPassword)))
             {
-                // Trả về token giả lập kèm trạng thái thành công
+                var jwtKey = _configuration["Jwt:Key"] ?? "silo_dashboard_dev_key_2026_change_me";
+                var jwtIssuer = _configuration["Jwt:Issuer"];
+                var jwtAudience = _configuration["Jwt:Audience"];
+
+                var claims = new List<Claim>
+                {
+                    new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                    new("sub", user.Id.ToString()),
+                    new("userId", user.Id.ToString()),
+                    new(ClaimTypes.Role, user.Role),
+                    new(ClaimTypes.Name, user.Name),
+                    new("avatarUrl", user.AvatarUrl ?? string.Empty),
+                    new("username", user.Username)
+                };
+
+                var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+                var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
+                var expires = DateTime.UtcNow.AddHours(8);
+
+                var token = new JwtSecurityToken(
+                    issuer: string.IsNullOrWhiteSpace(jwtIssuer) ? null : jwtIssuer,
+                    audience: string.IsNullOrWhiteSpace(jwtAudience) ? null : jwtAudience,
+                    claims: claims,
+                    notBefore: DateTime.UtcNow,
+                    expires: expires,
+                    signingCredentials: credentials);
+
                 return Ok(new LoginResponse
                 {
                     Success = true,
-                    Token = "silo_dashboard_secure_token_2026_xyz",
+                    Token = new JwtSecurityTokenHandler().WriteToken(token),
                     Message = "Đăng nhập thành công!"
                 });
             }
@@ -36,6 +78,15 @@ namespace SiloDashboardProxy.Controllers
                 Success = false, 
                 Message = "Tài khoản hoặc mật khẩu không chính xác!" 
             });
+        }
+
+        private static bool VerifyPassword(string password, string passwordHash)
+        {
+            if (string.IsNullOrWhiteSpace(passwordHash)) return false;
+
+            var bytes = Encoding.UTF8.GetBytes(password);
+            var hash = SHA256.HashData(bytes);
+            return string.Equals(Convert.ToHexString(hash), passwordHash, StringComparison.OrdinalIgnoreCase);
         }
 
         // Logout: với hệ thống JWT "pure" (không refresh token)

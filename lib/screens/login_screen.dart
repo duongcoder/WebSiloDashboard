@@ -63,20 +63,13 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      final ok = await _authService.login(
+      await _authService.login(
         username: username,
         password: password,
       );
 
 
       if (!mounted) return;
-
-      if (!ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đăng nhập thất bại')),
-        );
-        return;
-      }
 
       widget.onLoggedIn?.call();
 
@@ -89,10 +82,29 @@ class _LoginScreenState extends State<LoginScreen> {
         context,
         MaterialPageRoute(builder: (_) => const DashboardPage()),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
+
+      final rawMessage = e.toString().replaceAll('Exception: ', '').trim();
+      String localizedMessage;
+
+      if (rawMessage.contains('Incorrect username or password!')) {
+        localizedMessage = 'Tài khoản hoặc mật khẩu không chính xác. Vui lòng thử lại!';
+      } else if (rawMessage.contains('Unable to connect to server')) {
+        localizedMessage =
+            'Không thể kết nối tới máy chủ. Vui lòng kiểm tra lại kết nối mạng!';
+      } else {
+        localizedMessage = 'Đăng nhập thất bại. Vui lòng thử lại sau!';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lỗi hệ thống, vui lòng thử lại')),
+        SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text(
+            localizedMessage,
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);

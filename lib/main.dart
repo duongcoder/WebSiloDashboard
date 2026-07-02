@@ -19,7 +19,7 @@ import 'models/silo.dart';
 import 'models/silo_history_model.dart';
 import 'services/scale_service.dart';
 import 'services/excel_export_service.dart';
-import 'services/silo_api_service.dart';
+import 'services/silo_api_service.dart' hide baseUrl;
 import 'services/statistics_report_helper.dart';
 import 'services/sql_service.dart';
 import 'screens/login_screen.dart';
@@ -72,6 +72,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   static const int _settingsTabIndex = 6;
+  static const int _userManagementTabIndex = 7;
   static const double _defaultSiloMaxWeight = 100.0;
   static const Map<String, Duration> _timeframeDurations = {
     '1ph': Duration(minutes: 1),
@@ -84,6 +85,11 @@ class _DashboardPageState extends State<DashboardPage> {
   };
 
   int _selectedIndex = -1;
+  bool _isAdmin = true;
+  String _currentUserId = '';
+  String _currentUserName = 'Admin';
+  String _currentUserRole = 'User';
+  String _currentUserAvatarUrl = '';
 late signalr_core.HubConnection hubConnection;
   // (kept as signalr_core.HubConnection)
   double? _currentWeight;
@@ -114,8 +120,12 @@ late signalr_core.HubConnection hubConnection;
       TextEditingController(text: '100');
 
   List<Map<String, String>> _pumpPlanRows = [];
+  List<Map<String, dynamic>> _userAccounts = [];
+  bool _isLoadingUserAccounts = false;
+  String? _userAccountsError;
   Timer? _pumpTimer;
   Timer? _autoReportExportTimer;
+  Timer? _currentUserSyncTimer;
   DateTime? _lastReportExportAt;
   bool _isFetchingPumpPlan = false;
 
@@ -125,6 +135,7 @@ late signalr_core.HubConnection hubConnection;
     _siloApiService = SiloApiService(
       pollingInterval: const Duration(seconds: 5),
     );
+    _startCurrentUserSync();
     _initSignalR();
     _initializeDashboard();
 
@@ -141,6 +152,7 @@ late signalr_core.HubConnection hubConnection;
   void dispose() {
     _pumpTimer?.cancel();
     _autoReportExportTimer?.cancel();
+    _currentUserSyncTimer?.cancel();
     _historySubscription?.cancel();
     _siloApiService.dispose();
     _chartTransformController.dispose();
@@ -157,6 +169,363 @@ late signalr_core.HubConnection hubConnection;
     if (!mounted) return;
     await _startSiloHistoryStream();
     await _prefillSettingsForm();
+  }
+
+  Future<void> _syncCurrentUserFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final role = (prefs.getString('user_role') ?? 'admin').trim().toLowerCase();
+    final userId = (prefs.getString('user_id') ?? '').trim();
+    final username = (prefs.getString('user_name') ?? '').trim();
+    final avatarUrl = (prefs.getString('user_avatar_url') ?? '').trim();
+
+    final nextIsAdmin = role == 'admin';
+    final nextUserName = username.isNotEmpty
+        ? username
+        : (nextIsAdmin ? 'Admin' : 'Tài khoản của tôi');
+    final nextUserRole = role.isNotEmpty ? role : 'User';
+
+    if (!mounted) return;
+
+    if (_isAdmin == nextIsAdmin &&
+        _currentUserId == userId &&
+        _currentUserName == nextUserName &&
+        _currentUserRole == nextUserRole &&
+        _currentUserAvatarUrl == avatarUrl) {
+      return;
+    }
+
+    setState(() {
+      _isAdmin = nextIsAdmin;
+      _currentUserId = userId;
+      _currentUserName = nextUserName;
+      _currentUserRole = nextUserRole;
+      _currentUserAvatarUrl = avatarUrl;
+    });
+  }
+
+  Map<String, dynamic> _normalizeUserAccount(Map<String, dynamic> raw) {
+    final id = (raw['id'] ?? raw['userId'] ?? raw['uid'] ?? '').toString().trim();
+    final username = (raw['username'] ??
+            raw['userName'] ??
+            raw['name'] ??
+            raw['loginName'] ??
+            '')
+        .toString()
+        .trim();
+    final role = (raw['role'] ?? raw['userRole'] ?? 'sub').toString().trim();
+
+    return {
+      'id': id,
+      'username': username,
+      'role': role,
+    };
+  }
+
+  Future<void> _loadUserAccounts() async {
+    if (!_isAdmin) {
+      if (!mounted) return;
+      setState(() {
+        _userAccounts = const <Map<String, dynamic>>[];
+        _isLoadingUserAccounts = false;
+        _userAccountsError = null;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isLoadingUserAccounts = true;
+      _userAccountsError = null;
+    });
+
+    try {
+      final token = await AuthService().getToken();
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/v1/users'),
+        headers: {
+          'Accept': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode != 200) {
+        throw Exception('Load users failed: ${response.statusCode}');
+      }
+
+      final decoded = jsonDecode(response.body);
+      final rawUsers = decoded is List
+          ? decoded
+          : decoded is Map<String, dynamic>
+              ? (decoded['users'] ?? decoded['data'] ?? decoded['items'])
+              : null;
+
+      if (rawUsers is! List) {
+        throw Exception('Invalid users payload');
+      }
+
+      final users = rawUsers
+          .whereType<Map>()
+          .map((e) => _normalizeUserAccount(e.cast<String, dynamic>()))
+          .toList(growable: false);
+
+      if (!mounted) return;
+      setState(() {
+        _userAccounts = users;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _userAccountsError = 'Không tải được danh sách tài khoản: $e';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingUserAccounts = false;
+      });
+    }
+  }
+
+  Future<void> _createUserAccount({
+    required String username,
+    required String password,
+  }) async {
+    final token = await AuthService().getToken();
+    await http.post(
+      Uri.parse('$baseUrl/api/v1/users'),
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'username': username, 'password': password}),
+    ).timeout(const Duration(seconds: 12));
+
+    await _loadUserAccounts();
+  }
+
+  Future<void> _updateUserAccount({
+    required String userId,
+    required String username,
+    required String password,
+  }) async {
+    final body = <String, dynamic>{'username': username};
+    if (password.trim().isNotEmpty) {
+      body['password'] = password;
+    }
+
+    await http.put(
+      Uri.parse('$baseUrl/api/v1/users/$userId'),
+      headers: const {'Content-Type': 'application/json; charset=utf-8'},
+      body: jsonEncode(body),
+    ).timeout(const Duration(seconds: 12));
+
+    await _loadUserAccounts();
+  }
+
+  Future<void> _changeMyPassword(String newPassword) async {
+    await http.post(
+      Uri.parse('$baseUrl/api/v1/users/me/password'),
+      headers: const {'Content-Type': 'application/json; charset=utf-8'},
+      body: jsonEncode({'password': newPassword}),
+    ).timeout(const Duration(seconds: 12));
+  }
+
+  Future<void> _showCreateUserDialog() async {
+    final usernameController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Tạo tài khoản mới'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: usernameController,
+                  decoration: const InputDecoration(labelText: 'Tên đăng nhập'),
+                ),
+                TextField(
+                  controller: passwordController,
+                  decoration: const InputDecoration(labelText: 'Mật khẩu'),
+                  obscureText: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop({
+                  'username': usernameController.text.trim(),
+                  'password': passwordController.text,
+                });
+              },
+              child: const Text('Tạo'),
+            ),
+          ],
+        );
+      },
+    );
+
+    usernameController.dispose();
+    passwordController.dispose();
+
+    if (result == null) return;
+
+    final username = (result['username'] ?? '').trim();
+    final password = result['password'] ?? '';
+    if (username.isEmpty || password.isEmpty) return;
+
+    try {
+      await _createUserAccount(username: username, password: password);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã tạo tài khoản mới')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Tạo tài khoản thất bại: $e')),
+      );
+    }
+  }
+
+  Future<void> _showEditUserDialog(Map<String, dynamic> user) async {
+    final userId = (user['id'] ?? '').toString();
+    if (userId.isEmpty) return;
+
+    final usernameController = TextEditingController(
+      text: (user['username'] ?? '').toString(),
+    );
+    final passwordController = TextEditingController();
+
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Sửa đổi thông tin'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: usernameController,
+                  decoration: const InputDecoration(labelText: 'Tên đăng nhập'),
+                ),
+                TextField(
+                  controller: passwordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Mật khẩu mới (để trống nếu không đổi)',
+                  ),
+                  obscureText: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop({
+                  'username': usernameController.text.trim(),
+                  'password': passwordController.text,
+                });
+              },
+              child: const Text('Lưu'),
+            ),
+          ],
+        );
+      },
+    );
+
+    usernameController.dispose();
+    passwordController.dispose();
+
+    if (result == null) return;
+
+    final username = (result['username'] ?? '').trim();
+    final password = result['password'] ?? '';
+    if (username.isEmpty) return;
+
+    try {
+      await _updateUserAccount(
+        userId: userId,
+        username: username,
+        password: password,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã cập nhật tài khoản')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cập nhật thất bại: $e')),
+      );
+    }
+  }
+
+  Future<void> _showChangeMyPasswordDialog() async {
+    final passwordController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Đổi mật khẩu'),
+          content: TextField(
+            controller: passwordController,
+            decoration: const InputDecoration(labelText: 'Mật khẩu mới'),
+            obscureText: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(passwordController.text),
+              child: const Text('Lưu'),
+            ),
+          ],
+        );
+      },
+    );
+
+    passwordController.dispose();
+
+    final newPassword = (result ?? '').trim();
+    if (newPassword.isEmpty) return;
+
+    try {
+      await _changeMyPassword(newPassword);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã cập nhật mật khẩu')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Đổi mật khẩu thất bại: $e')),
+      );
+    }
+  }
+
+  void _startCurrentUserSync() {
+    _syncCurrentUserFromPrefs();
+    _currentUserSyncTimer?.cancel();
+    _currentUserSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _syncCurrentUserFromPrefs();
+    });
   }
 
   Future<void> _fetchPumpPlan() async {
@@ -798,6 +1167,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
     setState(() {
       _selectedIndex = index;
     });
+
+    if (index == _userManagementTabIndex) {
+      _loadUserAccounts();
+    }
   }
 
   Color _statusColor(String status) {
@@ -924,7 +1297,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   }
 
   List<Map<String, dynamic>> get _sidebarMenuConfig {
-    return const [
+    final items = <Map<String, dynamic>>[
       {'icon': Icons.dashboard_customize, 'label': 'Tổng quan'},
       {'icon': Icons.storage, 'label': 'Giám sát silo'},
       {'icon': Icons.autorenew, 'label': 'Kế hoạch bơm/xả'},
@@ -932,8 +1305,13 @@ hubConnection = signalr_core.HubConnectionBuilder()
       {'icon': Icons.warning_amber_rounded, 'label': 'Cảnh báo'},
       {'icon': Icons.description, 'label': 'Báo cáo'},
       {'icon': Icons.settings_applications, 'label': 'Cài đặt'},
-      {'icon': Icons.group, 'label': 'Quản lý người dùng'},
     ];
+
+    if (_isAdmin) {
+      items.add({'icon': Icons.group, 'label': 'Quản lý người dùng'});
+    }
+
+    return items;
   }
 
   List<Widget> _buildSidebarMenuItems({required bool closeDrawerAfterTap}) {
@@ -948,6 +1326,14 @@ hubConnection = signalr_core.HubConnectionBuilder()
           index: i,
           selectedIndex: _selectedIndex,
           onTap: () {
+            final label = item['label'] as String;
+            final isSettingsItem = label == 'Cài đặt';
+
+            if (!_isAdmin && isSettingsItem) {
+              // Tài khoản con: bấm Cài đặt thì giữ im lặng, không làm gì.
+              return;
+            }
+
             _select(i);
             if (closeDrawerAfterTap) {
               Navigator.of(context).maybePop();
@@ -2020,10 +2406,126 @@ hubConnection = signalr_core.HubConnectionBuilder()
     );
   }
 
+  Widget _buildUserManagementCard() {
+    if (_isAdmin) {
+      return Card(
+        elevation: 4,
+        margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text(
+                    'Quản lý người dùng',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                  _buildInfoBadge('Tài khoản: ${_userAccounts.length}'),
+                  OutlinedButton.icon(
+                    onPressed: _loadUserAccounts,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Tải lại'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _showCreateUserDialog,
+                    icon: const Icon(Icons.person_add),
+                    label: const Text('Tạo tài khoản mới'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_isLoadingUserAccounts)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_userAccountsError != null)
+                Text(
+                  _userAccountsError!,
+                  style: const TextStyle(color: Colors.red),
+                )
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    headingRowColor: WidgetStateProperty.resolveWith(
+                      (states) => Colors.blue.shade50,
+                    ),
+                    columns: const [
+                      DataColumn(label: Text('Tên đăng nhập')),
+                      DataColumn(label: Text('Vai trò')),
+                      DataColumn(label: Text('Thao tác')),
+                    ],
+                    rows: _userAccounts.map((user) {
+                      final username = (user['username'] ?? '').toString();
+                      final role = (user['role'] ?? 'sub').toString();
+
+                      return DataRow(
+                        cells: [
+                          DataCell(Text(username)),
+                          DataCell(Text(role)),
+                          DataCell(
+                            OutlinedButton.icon(
+                              onPressed: () => _showEditUserDialog(user),
+                              icon: const Icon(Icons.edit, size: 16),
+                              label: const Text('Sửa đổi thông tin'),
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(growable: false),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Thông tin cá nhân',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.person),
+              title: Text(_currentUserName),
+              subtitle: const Text('Tài khoản con'),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ElevatedButton.icon(
+                onPressed: _showChangeMyPasswordDialog,
+                icon: const Icon(Icons.lock_reset),
+                label: const Text('Đổi mật khẩu'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
     final showSettings = _selectedIndex == _settingsTabIndex;
+    final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final horizontalPadding = maxWidth < 640 ? 10.0 : 16.0;
 
     return Scaffold(
@@ -2048,14 +2550,17 @@ hubConnection = signalr_core.HubConnectionBuilder()
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showStats && !showSettings)
+                if (showStats && !showSettings && !showUserManagement)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
                   ),
-                if (showStats && !showSettings) const SizedBox(height: 16),
+                if (showStats && !showSettings && !showUserManagement)
+                  const SizedBox(height: 16),
                 if (showSettings)
                   _buildSettingsConfigurationCard()
+                else if (showUserManagement)
+                  _buildUserManagementCard()
                 else ...[
                   _buildModulesAndChartSection(maxWidth),
                   const SizedBox(height: 16),
@@ -2072,6 +2577,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showSettings = _selectedIndex == _settingsTabIndex;
+    final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final rightPanelWidth = (screenWidth * 0.30).clamp(420.0, 560.0);
 
     return Scaffold(
@@ -2164,20 +2670,42 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                 shape: BoxShape.circle,
                                 color: Colors.blue.shade700,
                               ),
-                              child: const Icon(Icons.person, color: Colors.white, size: 22),
+                              child: ClipOval(
+                                child: _currentUserAvatarUrl.isNotEmpty
+                                    ? Image.network(
+                                        _currentUserAvatarUrl,
+                                        width: 42,
+                                        height: 42,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return const Icon(
+                                            Icons.person,
+                                            color: Colors.white,
+                                            size: 22,
+                                          );
+                                        },
+                                      )
+                                    : const Icon(Icons.person, color: Colors.white, size: 22),
+                              ),
                             ),
                             const SizedBox(width: 12),
-                            const Column(
+                            Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
-                                  'Admin',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  _currentUserName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
                                 ),
                                 Text(
-                                  'Quản trị hệ thống',
-                                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                                  _currentUserRole,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black54,
+                                  ),
                                 ),
                               ],
                             ),
@@ -2201,7 +2729,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!showSettings)
+                          if (!showSettings && !showUserManagement)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: LayoutBuilder(
@@ -2218,6 +2746,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                 ? SingleChildScrollView(
                                     child: _buildSettingsConfigurationCard(),
                                   )
+                                : showUserManagement
+                                    ? SingleChildScrollView(
+                                        child: _buildUserManagementCard(),
+                                      )
                                 : Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [

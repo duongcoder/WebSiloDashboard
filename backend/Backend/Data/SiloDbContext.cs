@@ -17,5 +17,7 @@ namespace Backend.Data
         public DbSet<Controller> Controllers { get; set; } = null!;
 
         public DbSet<ColData> ColData { get; set; } = null!;
+
+        public DbSet<AppUser> Users { get; set; } = null!;
     }
 }

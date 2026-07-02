@@ -1,10 +1,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.NewtonsoftJson;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Backend.Data;   
 using Backend.Models;
 using Backend.Hubs;
+using System.Text;
+using System.Text.Json;
 
 namespace Backend
 {
@@ -67,16 +71,79 @@ namespace Backend
                 });
             });
 
-            // 5. Đăng ký SignalR
+            // 5. Đăng ký JWT Authentication cho RBAC
+            var jwtKey = builder.Configuration["Jwt:Key"] ?? "silo_dashboard_dev_key_2026_change_me";
+            var jwtIssuer = builder.Configuration["Jwt:Issuer"];
+            var jwtAudience = builder.Configuration["Jwt:Audience"];
+
+            builder.Services
+                .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                        ValidateIssuer = !string.IsNullOrWhiteSpace(jwtIssuer),
+                        ValidIssuer = jwtIssuer,
+                        ValidateAudience = !string.IsNullOrWhiteSpace(jwtAudience),
+                        ValidAudience = jwtAudience,
+                        ValidateLifetime = true,
+                        ClockSkew = TimeSpan.FromMinutes(1)
+                    };
+
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnChallenge = async context =>
+                        {
+                            context.HandleResponse();
+                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            context.Response.ContentType = "application/json";
+                            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                            {
+                                message = "Unauthorized"
+                            }));
+                        },
+                        OnForbidden = async context =>
+                        {
+                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                            context.Response.ContentType = "application/json";
+                            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                            {
+                                message = "Forbidden"
+                            }));
+                        },
+                        OnAuthenticationFailed = async context =>
+                        {
+                            context.NoResult();
+                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            context.Response.ContentType = "application/json";
+                            await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                            {
+                                message = "Invalid token"
+                            }));
+                        }
+                    };
+                });
+
+            // 6. Đăng ký SignalR
             builder.Services.AddSignalR();
 
             var app = builder.Build();
 
             // --- Middleware Pipeline ---
-            if (app.Environment.IsDevelopment())
+            app.UseExceptionHandler(errorApp =>
             {
-                app.UseDeveloperExceptionPage();
-            }
+                errorApp.Run(async context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                    {
+                        message = "Internal server error"
+                    }));
+                });
+            });
 
             app.UseRouting();
             
@@ -100,6 +167,8 @@ namespace Backend
 
             // CORS đặt cố định tại đây
             app.UseCors("AllowAll");
+
+            app.UseAuthentication();
             
             app.UseAuthorization();
 
@@ -117,6 +186,45 @@ namespace Backend
 
             app.MapControllers();
             app.MapHub<SiloHub>("/siloHub");
+
+            // ====================================================================
+            // ▼ TỰ ĐỘNG KHỞI TẠO HOẶC CẬP NHẬT TÀI KHOẢN ADMIN CHUẨN SHA-256 ▼
+            using (var scope = app.Services.CreateScope())
+            {
+                var services = scope.ServiceProvider;
+                try
+                {
+                    var context = services.GetRequiredService<SiloDbContext>();
+                    var adminUser = context.Users.FirstOrDefault(u => u.Username == "admin");
+
+                    // Chuỗi SHA-256 viết hoa chuẩn của mật khẩu "123"
+                    string hashedAdminPassword = "A665A45920422F9D417E4867EFDC4FB8A04A1F3FFF1FA07E998E86F7F7A27AE3";
+
+                    if (adminUser == null)
+                    {
+                        // Nếu chưa có tài khoản admin thì tạo mới hoàn toàn
+                        context.Users.Add(new AppUser
+                        {
+                            Username = "admin",
+                            Name = "Quản trị viên Silo",
+                            Role = "Admin",
+                            PasswordHash = hashedAdminPassword
+                        });
+                        context.SaveChanges();
+                    }
+                    else if (adminUser.PasswordHash == "123")
+                    {
+                        // Nếu tài khoản admin đã tồn tại nhưng mang mật khẩu thô "123", tự động cập nhật lên chuỗi mã hóa
+                        adminUser.PasswordHash = hashedAdminPassword;
+                        context.SaveChanges();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SeedData Error]: {ex.Message}");
+                }
+            }
+            // ▲ ==================================================================== ▲
 
             app.Run();
         }
