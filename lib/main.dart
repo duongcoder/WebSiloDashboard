@@ -24,6 +24,7 @@ import 'services/statistics_report_helper.dart';
 import 'services/sql_service.dart';
 import 'screens/login_screen.dart';
 import 'services/auth_service.dart';
+import 'widgets/silo_plan_table.dart';
 import 'widgets/silo_report_table.dart';
 import 'widgets/silo_module.dart';
 
@@ -72,6 +73,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const int _pumpPlanTabIndex = 2;
   static const int _reportTabIndex = 5;
   static const int _settingsTabIndex = 6;
   static const int _userManagementTabIndex = 7;
@@ -1200,12 +1202,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return Colors.grey.shade200;
   }
 
-  double _tableRowMinHeight(bool isMobile) => isMobile ? 46 : 44;
-
-  double _tableColumnSpacing(bool isMobile) => isMobile ? 14 : 22;
-
-  double _tableHorizontalMargin(bool isMobile) => isMobile ? 10 : 16;
-
   Widget _buildInfoBadge(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1221,23 +1217,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
           fontWeight: FontWeight.w600,
           color: Colors.blue.shade900,
         ),
-      ),
-    );
-  }
-
-  Widget _buildStatusBadge(String status, {required bool isMobile}) {
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 8 : 10,
-        vertical: 4,
-      ),
-      decoration: BoxDecoration(
-        color: _statusColor(status),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        status,
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -1658,327 +1637,147 @@ hubConnection = signalr_core.HubConnectionBuilder()
     );
   }
 
-  Widget _buildPlanCard({
-    required String title,
-    required List<Map<String, String>> rows,
-    required String addSnackBarText,
-    required String deleteSnackBarText,
-    required String exportFilePrefix,
-  }) {
-    final pumpSiloIds = _getPumpPlanSiloIds(rows);
-    final selectedPumpPlanSiloId = _getEffectivePumpPlanSiloId(rows);
-    final filteredRows = _getFilteredPumpPlanRows(rows);
-    final visibleRows = filteredRows.take(10).toList();
-    final planTitleText = selectedPumpPlanSiloId == null
-        ? '$title tổng'
-        : '$title silo $selectedPumpPlanSiloId';
+  Future<Map<String, String>?> _showAddPumpPlanDialog() async {
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        final timeController = TextEditingController();
+        final siloController = TextEditingController();
+        final materialController = TextEditingController();
+        final qtyController = TextEditingController();
+        final statusController = TextEditingController(text: 'Chờ');
 
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isMobile = constraints.maxWidth < 600;
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: isMobile ? constraints.maxWidth : 360,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              planTitleText,
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.shade100),
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int?>(
-                                value: selectedPumpPlanSiloId,
-                                isDense: true,
-                                items: [
-                                  const DropdownMenuItem<int?>(
-                                    value: null,
-                                    child: Text('Tổng các Silo'),
-                                  ),
-                                  ...pumpSiloIds.map(
-                                    (id) => DropdownMenuItem<int?>(
-                                      value: id,
-                                      child: Text('Silo $id'),
-                                    ),
-                                  ),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedPumpPlanSiloId = value;
-                                  });
-                                },
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final result = await exportPlanRowsToExcel(
-                          filePrefix: exportFilePrefix,
-                          rows: filteredRows,
-                        );
-
-                        if (!mounted) return;
-
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(result.message)),
-                        );
-                      },
-                      icon: const Icon(Icons.table_view),
-                      label: const Text('Xuất excel'),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final result = await showDialog<Map<String, String>>(
-                          context: context,
-                          builder: (dialogContext) {
-                            final timeController = TextEditingController();
-                            final siloController = TextEditingController();
-                            final materialController = TextEditingController();
-                            final qtyController = TextEditingController();
-                            final statusController = TextEditingController(text: 'Chờ');
-
-                            return AlertDialog(
-                              title: const Text('Thêm kế hoạch'),
-                              content: SingleChildScrollView(
-                                child: Column(
-                                  children: [
-                                    TextField(
-                                      controller: timeController,
-                                      decoration: const InputDecoration(labelText: 'Thời gian'),
-                                    ),
-                                    TextField(
-                                      controller: siloController,
-                                      decoration: const InputDecoration(labelText: 'Silo'),
-                                    ),
-                                    TextField(
-                                      controller: materialController,
-                                      decoration: const InputDecoration(labelText: 'Nguyên liệu'),
-                                    ),
-                                    TextField(
-                                      controller: qtyController,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(labelText: 'Số lượng'),
-                                    ),
-                                    TextField(
-                                      controller: statusController,
-                                      decoration: const InputDecoration(labelText: 'Trạng thái'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(dialogContext).pop(),
-                                  child: const Text('Hủy'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    Navigator.of(dialogContext).pop({
-                                      'time': timeController.text.trim(),
-                                      'silo': siloController.text.trim(),
-                                      'material': materialController.text.trim(),
-                                      'qty': qtyController.text.trim(),
-                                      'status': statusController.text.trim(),
-                                    });
-                                  },
-                                  child: const Text('Thêm'),
-                                ),
-                              ],
-                            );
-                          },
-                        );
-
-                        if (result == null) return;
-                        if (!mounted) return;
-
-                        final time = result['time'] ?? '';
-                        final silo = result['silo'] ?? '';
-                        final material = result['material'] ?? '';
-                        final qty = result['qty'] ?? '';
-                        final status = result['status'] ?? '';
-
-                        if (time.isEmpty ||
-                            silo.isEmpty ||
-                            material.isEmpty ||
-                            qty.isEmpty ||
-                            status.isEmpty) {
-                          messenger.showSnackBar(
-                            const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
-                          );
-                          return;
-                        }
-
-                        setState(() {
-                          rows.add({
-                            'time': time,
-                            'silo': silo,
-                            'material': material,
-                            'qty': qty,
-                            'status': status,
-                          });
-                        });
-
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(addSnackBarText)),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Thêm kế hoạch'),
-                    ),
-                    _buildInfoBadge('Hiển thị: ${visibleRows.length}'),
-                  ],
+        return AlertDialog(
+          title: const Text('Thêm kế hoạch'),
+          content: SingleChildScrollView(
+            child: Column(
+              children: [
+                TextField(
+                  controller: timeController,
+                  decoration: const InputDecoration(labelText: 'Thời gian'),
                 ),
-              ),
-              ScrollConfiguration(
-                behavior: const MaterialScrollBehavior().copyWith(
-                  dragDevices: {
-                    PointerDeviceKind.touch,
-                    PointerDeviceKind.mouse,
-                    PointerDeviceKind.trackpad,
-                    PointerDeviceKind.stylus,
-                    PointerDeviceKind.unknown,
-                  },
+                TextField(
+                  controller: siloController,
+                  decoration: const InputDecoration(labelText: 'Silo'),
                 ),
-                child: Scrollbar(
-                  controller: _pumpPlanTableScrollController,
-                  thumbVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _pumpPlanTableScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.resolveWith(
-                          (states) => Colors.blue.shade50,
-                        ),
-                        dataRowMinHeight: _tableRowMinHeight(isMobile),
-                        columnSpacing: _tableColumnSpacing(isMobile),
-                        horizontalMargin: _tableHorizontalMargin(isMobile),
-                        columns: [
-                          const DataColumn(label: Text('STT')),
-                          const DataColumn(label: Text('Tên silo')),
-                          const DataColumn(label: Text('Thời gian')),
-                          if (!isMobile) const DataColumn(label: Text('Nguyên liệu')),
-                          const DataColumn(label: Text('Số lượng'), numeric: true),
-                          const DataColumn(label: Text('Trạng thái')),
-                          const DataColumn(label: Text('Xóa')),
-                        ],
-                        rows: List<DataRow>.generate(visibleRows.length, (index) {
-                          final row = visibleRows[index];
-                          final status = row['status'] ?? '';
-
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                SizedBox(
-                                  width: 56,
-                                  child: Text('${index + 1}'),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: 90,
-                                  child: Text(
-                                    row['silo'] ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                SizedBox(
-                                  width: isMobile ? 220 : 240,
-                                  child: Text(
-                                    row['time'] ?? '',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                              if (!isMobile)
-                                DataCell(
-                                  SizedBox(
-                                    width: 180,
-                                    child: Text(
-                                      row['material'] ?? '',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
-                              DataCell(
-                                SizedBox(
-                                  width: 90,
-                                  child: Text(row['qty'] ?? ''),
-                                ),
-                              ),
-                              DataCell(_buildStatusBadge(status, isMobile: isMobile)),
-                              DataCell(
-                                SizedBox(
-                                  width: 56,
-                                  child: IconButton(
-                                    tooltip: 'Xóa kế hoạch',
-                                    icon: const Icon(Icons.delete_forever, color: Colors.red),
-                                    onPressed: () {
-                                      setState(() {
-                                        rows.remove(row);
-                                      });
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text(deleteSnackBarText)),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        }),
-                      ),
-                    ),
-                  ),
+                TextField(
+                  controller: materialController,
+                  decoration: const InputDecoration(labelText: 'Nguyên liệu'),
                 ),
-              ),
-            ],
-          );
-        },
-      ),
+                TextField(
+                  controller: qtyController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Số lượng'),
+                ),
+                TextField(
+                  controller: statusController,
+                  decoration: const InputDecoration(labelText: 'Trạng thái'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop({
+                  'time': timeController.text.trim(),
+                  'silo': siloController.text.trim(),
+                  'material': materialController.text.trim(),
+                  'qty': qtyController.text.trim(),
+                  'status': statusController.text.trim(),
+                });
+              },
+              child: const Text('Thêm'),
+            ),
+          ],
+        );
+      },
     );
+
+    return result;
   }
 
   Widget _buildPumpPlanCard() {
-    return _buildPlanCard(
+    final pumpSiloIds = _getPumpPlanSiloIds(_pumpPlanRows);
+    final selectedPumpPlanSiloId = _getEffectivePumpPlanSiloId(_pumpPlanRows);
+    final filteredRows = _getFilteredPumpPlanRows(_pumpPlanRows);
+    final visibleRows = filteredRows.take(10).toList(growable: false);
+
+    // Tách phần UI thành widget dùng chung, giữ toàn bộ state/logic tại Dashboard.
+    return SiloPlanTable(
       title: 'Danh sách kế hoạch',
-      rows: _pumpPlanRows,
-      addSnackBarText: 'Đã thêm kế hoạch',
-      deleteSnackBarText: 'Đã xóa kế hoạch',
-      exportFilePrefix: 'ke_hoach_bom',
+      pumpSiloIds: pumpSiloIds,
+      selectedPumpPlanSiloId: selectedPumpPlanSiloId,
+      filteredRows: filteredRows,
+      visibleRows: visibleRows,
+      scrollController: _pumpPlanTableScrollController,
+      onPlanSiloChanged: (value) {
+        setState(() {
+          _selectedPumpPlanSiloId = value;
+        });
+      },
+      onExportExcel: () async {
+        final messenger = ScaffoldMessenger.of(context);
+        final result = await exportPlanRowsToExcel(
+          filePrefix: 'ke_hoach_bom',
+          rows: filteredRows,
+        );
+
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(content: Text(result.message)),
+        );
+      },
+      onAddPlanClick: () async {
+        final messenger = ScaffoldMessenger.of(context);
+        final result = await _showAddPumpPlanDialog();
+
+        if (result == null || !mounted) return;
+
+        final time = result['time'] ?? '';
+        final silo = result['silo'] ?? '';
+        final material = result['material'] ?? '';
+        final qty = result['qty'] ?? '';
+        final status = result['status'] ?? '';
+
+        if (time.isEmpty ||
+            silo.isEmpty ||
+            material.isEmpty ||
+            qty.isEmpty ||
+            status.isEmpty) {
+          messenger.showSnackBar(
+            const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
+          );
+          return;
+        }
+
+        setState(() {
+          _pumpPlanRows.add({
+            'time': time,
+            'silo': silo,
+            'material': material,
+            'qty': qty,
+            'status': status,
+          });
+        });
+
+        messenger.showSnackBar(
+          const SnackBar(content: Text('Đã thêm kế hoạch')),
+        );
+      },
+      onDeletePlan: (row) {
+        setState(() {
+          _pumpPlanRows.remove(row);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã xóa kế hoạch')),
+        );
+      },
+      statusColorBuilder: _statusColor,
     );
   }
 
@@ -2022,6 +1821,15 @@ hubConnection = signalr_core.HubConnectionBuilder()
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildStatisticsReportCard(),
+      ],
+    );
+  }
+
+  Widget _buildPumpPlanTabSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPumpPlanCard(),
       ],
     );
   }
@@ -2328,6 +2136,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
+    final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
@@ -2355,17 +2164,27 @@ hubConnection = signalr_core.HubConnectionBuilder()
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showStats && !showSettings && !showUserManagement && !showReportTab)
+                if (showStats &&
+                    !showSettings &&
+                    !showUserManagement &&
+                    !showReportTab &&
+                    !showPumpPlanTab)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
                   ),
-                if (showStats && !showSettings && !showUserManagement && !showReportTab)
+                if (showStats &&
+                    !showSettings &&
+                    !showUserManagement &&
+                    !showReportTab &&
+                    !showPumpPlanTab)
                   const SizedBox(height: 16),
                 if (showSettings)
                   _buildSettingsConfigurationCard()
                 else if (showUserManagement)
                   _buildUserManagementCard()
+                else if (showPumpPlanTab)
+                  _buildPumpPlanTabSection()
                 else if (showReportTab)
                   _buildReportTabSection()
                 else ...[
@@ -2383,6 +2202,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
@@ -2537,7 +2357,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!showSettings && !showUserManagement && !showReportTab)
+                          if (!showSettings &&
+                              !showUserManagement &&
+                              !showReportTab &&
+                              !showPumpPlanTab)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: LayoutBuilder(
@@ -2558,6 +2381,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                     ? SingleChildScrollView(
                                         child: _buildUserManagementCard(),
                                       )
+                                : showPumpPlanTab
+                                  ? SingleChildScrollView(
+                                    child: _buildPumpPlanTabSection(),
+                                    )
                                 : showReportTab
                                     ? SingleChildScrollView(
                                         child: _buildReportTabSection(),
