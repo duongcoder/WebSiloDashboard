@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -26,6 +25,8 @@ import 'screens/login_screen.dart';
 import 'services/auth_service.dart';
 import 'widgets/silo_plan_table.dart';
 import 'widgets/silo_report_table.dart';
+import 'widgets/silo_mass_chart.dart';
+import 'widgets/silo_visualizer.dart';
 import 'widgets/silo_module.dart';
 
 void main() {
@@ -73,6 +74,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const int _siloMonitorTabIndex = 1;
   static const int _pumpPlanTabIndex = 2;
   static const int _reportTabIndex = 5;
   static const int _settingsTabIndex = 6;
@@ -116,6 +118,7 @@ late signalr_core.HubConnection hubConnection;
   final Map<int, double> _siloNoiseThresholdConfig = <int, double>{};
   final Map<int, double> _siloMaxConfig = <int, double>{};
   int? _selectedSettingsSiloId;
+  int? _selectedMonitorSiloId;
   int? _selectedPumpPlanSiloId;
   int? _selectedStatisticsSiloId;
   String? _settingsMaxWeightError;
@@ -719,6 +722,50 @@ late signalr_core.HubConnection hubConnection;
     return ids;
   }
 
+  int? _getEffectiveMonitorSiloId() {
+    final ids = _getSettingsSiloIds();
+    if (ids.isEmpty) return null;
+
+    final selected = _selectedMonitorSiloId;
+    if (selected != null && ids.contains(selected)) {
+      return selected;
+    }
+
+    return ids.first;
+  }
+
+  String _getMonitorSiloName(int siloId) {
+    for (final silo in _silos) {
+      final id = _extractSiloId(silo.id, fallback: -1);
+      if (id == siloId) {
+        return silo.id;
+      }
+    }
+    return 'Silo $siloId';
+  }
+
+  double _getLatestWeightForSilo(int siloId) {
+    for (var i = _siloHistory.length - 1; i >= 0; i--) {
+      final row = _siloHistory[i];
+      if (row.idScale == siloId) {
+        return row.weightNow;
+      }
+    }
+
+    return _currentWeight ?? 0.0;
+  }
+
+  DateTime? _getLatestTimestampForSilo(int siloId) {
+    for (var i = _siloHistory.length - 1; i >= 0; i--) {
+      final row = _siloHistory[i];
+      if (row.idScale == siloId) {
+        return row.time;
+      }
+    }
+
+    return null;
+  }
+
   String? _validateMaxWeight(String input) {
     final normalized = input.trim().replaceAll(',', '.');
     if (normalized.isEmpty) return 'Vui lòng nhập Cân Max';
@@ -1280,6 +1327,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   List<Map<String, dynamic>> get _sidebarMenuConfig {
     final items = <Map<String, dynamic>>[
       {'icon': Icons.dashboard_customize, 'label': 'Tổng quan'},
+      // Tab giám sát silo luôn mở cho cả Admin và User.
       {'icon': Icons.storage, 'label': 'Giám sát silo'},
       {'icon': Icons.autorenew, 'label': 'Kế hoạch bơm/xả'},
       {'icon': Icons.history, 'label': 'Lịch sử'},
@@ -1493,23 +1541,29 @@ hubConnection = signalr_core.HubConnectionBuilder()
     );
   }
 
-  List<SiloVolumePoint> _buildSiloVolumePoints() {
-    if (_siloHistory.isEmpty) return const <SiloVolumePoint>[];
+  List<SiloMassPoint> _buildSiloMassPoints({int? siloId}) {
+    if (_siloHistory.isEmpty) return const <SiloMassPoint>[];
+
+    final sourceHistory = siloId == null
+        ? _siloHistory
+        : _siloHistory.where((row) => row.idScale == siloId).toList(growable: false);
+
+    if (sourceHistory.isEmpty) return const <SiloMassPoint>[];
 
     final timeframeDuration = _timeframeDurations[_selectedTimeframe] ??
         const Duration(hours: 1);
 
     final rows = _siloApiService.filterByTimeframe(
-      source: _siloHistory,
+      source: sourceHistory,
       timeframe: timeframeDuration,
     );
 
     // Nếu filter theo timeframe rỗng thì lấy tạm 20 điểm gần nhất để tránh chart trống.
     final sourceRows = rows.isNotEmpty
       ? rows
-      : (_siloHistory.length > 20
-        ? _siloHistory.sublist(_siloHistory.length - 20)
-        : _siloHistory);
+      : (sourceHistory.length > 20
+        ? sourceHistory.sublist(sourceHistory.length - 20)
+        : sourceHistory);
 
     final points = sourceRows
         .where((row) {
@@ -1523,7 +1577,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
           return true;
         })
-        .map((row) => SiloVolumePoint(
+        .map((row) => SiloMassPoint(
               time: row.time,
               weight: row.weightNow.toDouble(),
             ))
@@ -1532,12 +1586,12 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
     // Fallback lần cuối: nếu toàn bộ điểm bị loại thì thử lấy lại từ 20 điểm mới nhất không qua filter timeframe.
     if (points.isEmpty) {
-      final latestRows = _siloHistory.length > 20
-          ? _siloHistory.sublist(_siloHistory.length - 20)
-          : _siloHistory;
+      final latestRows = sourceHistory.length > 20
+          ? sourceHistory.sublist(sourceHistory.length - 20)
+          : sourceHistory;
 
       return latestRows
-          .map((row) => SiloVolumePoint(
+          .map((row) => SiloMassPoint(
                 time: row.time,
                 weight: row.weightNow.toDouble(),
               ))
@@ -1584,7 +1638,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       _ => 0.88,
     };
 
-    final chartPoints = _buildSiloVolumePoints();
+    final chartPoints = _buildSiloMassPoints();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1622,15 +1676,15 @@ hubConnection = signalr_core.HubConnectionBuilder()
           }).toList(),
         ),
         const SizedBox(height: 20),
-        SiloVolumeChart(
+        SiloMassChart(
           title: _silos.isNotEmpty
               ? 'Biểu đồ khối lượng ${_silos.first.id}'
               : 'Biểu đồ khối lượng Silo',
-          points: chartPoints,
+          chartData: chartPoints,
           rawCount: _siloHistory.length,
-          selectedTimeframe: _selectedTimeframe,
-          timeframeOptions: _timeframeDurations.keys.toList(growable: false),
-          onTimeframeSelected: _handleTimeframeSelected,
+          selectedTimeRange: _selectedTimeframe,
+          timeRangeOptions: _timeframeDurations.keys.toList(growable: false),
+          onTimeRangeChanged: _handleTimeframeSelected,
           transformationController: _chartTransformController,
         ),
       ],
@@ -1830,6 +1884,95 @@ hubConnection = signalr_core.HubConnectionBuilder()
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildPumpPlanCard(),
+      ],
+    );
+  }
+
+  Widget _buildSiloMonitorTabSection() {
+    final monitorSiloIds = _getSettingsSiloIds();
+    final selectedMonitorSiloId = _getEffectiveMonitorSiloId();
+
+    if (selectedMonitorSiloId == null) {
+      return Card(
+        elevation: 4,
+        margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+        child: const Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('Chưa có dữ liệu silo để giám sát'),
+        ),
+      );
+    }
+
+    final monitorWeight = _getLatestWeightForSilo(selectedMonitorSiloId);
+    final monitorUpdatedAt = _getLatestTimestampForSilo(selectedMonitorSiloId);
+    final monitorName = _getMonitorSiloName(selectedMonitorSiloId);
+    final monitorChartData = _buildSiloMassPoints(siloId: selectedMonitorSiloId);
+    final monitorRawCount = _siloHistory
+      .where((row) => row.idScale == selectedMonitorSiloId)
+      .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          elevation: 4,
+          margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Giám sát mô phỏng silo',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                  ),
+                ),
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<int>(
+                    initialValue: selectedMonitorSiloId,
+                    items: monitorSiloIds
+                        .map(
+                          (id) => DropdownMenuItem<int>(
+                            value: id,
+                            child: Text('Silo $id'),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _selectedMonitorSiloId = value;
+                      });
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Silo',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Widget mô phỏng dùng chung cho khu vực Tổng quan và tab Giám sát silo.
+        SiloVisualizer(
+          siloName: monitorName,
+          currentWeight: monitorWeight,
+          maxWeight: _getSiloMaxWeight(selectedMonitorSiloId),
+          lastUpdatedAt: monitorUpdatedAt,
+        ),
+        const SizedBox(height: 12),
+        SiloMassChart(
+          title: 'Biểu đồ khối lượng $monitorName',
+          chartData: monitorChartData,
+          rawCount: monitorRawCount,
+          selectedTimeRange: _selectedTimeframe,
+          timeRangeOptions: _timeframeDurations.keys.toList(growable: false),
+          onTimeRangeChanged: _handleTimeframeSelected,
+          transformationController: _chartTransformController,
+        ),
       ],
     );
   }
@@ -2136,6 +2279,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
+    final showSiloMonitorTab = _selectedIndex == _siloMonitorTabIndex;
     final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
@@ -2168,7 +2312,8 @@ hubConnection = signalr_core.HubConnectionBuilder()
                     !showSettings &&
                     !showUserManagement &&
                     !showReportTab &&
-                    !showPumpPlanTab)
+                    !showPumpPlanTab &&
+                    !showSiloMonitorTab)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
@@ -2177,12 +2322,15 @@ hubConnection = signalr_core.HubConnectionBuilder()
                     !showSettings &&
                     !showUserManagement &&
                     !showReportTab &&
-                    !showPumpPlanTab)
+                    !showPumpPlanTab &&
+                    !showSiloMonitorTab)
                   const SizedBox(height: 16),
                 if (showSettings)
                   _buildSettingsConfigurationCard()
                 else if (showUserManagement)
                   _buildUserManagementCard()
+                else if (showSiloMonitorTab)
+                  _buildSiloMonitorTabSection()
                 else if (showPumpPlanTab)
                   _buildPumpPlanTabSection()
                 else if (showReportTab)
@@ -2202,6 +2350,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final showSiloMonitorTab = _selectedIndex == _siloMonitorTabIndex;
     final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
@@ -2360,7 +2509,8 @@ hubConnection = signalr_core.HubConnectionBuilder()
                           if (!showSettings &&
                               !showUserManagement &&
                               !showReportTab &&
-                              !showPumpPlanTab)
+                              !showPumpPlanTab &&
+                              !showSiloMonitorTab)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: LayoutBuilder(
@@ -2381,6 +2531,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                     ? SingleChildScrollView(
                                         child: _buildUserManagementCard(),
                                       )
+                                : showSiloMonitorTab
+                                  ? SingleChildScrollView(
+                                    child: _buildSiloMonitorTabSection(),
+                                    )
                                 : showPumpPlanTab
                                   ? SingleChildScrollView(
                                     child: _buildPumpPlanTabSection(),
@@ -2442,285 +2596,5 @@ hubConnection = signalr_core.HubConnectionBuilder()
     }
 
     return _buildDesktopDashboard(sidebarWidth);
-  }
-}
-
-class SiloVolumePoint {
-  final DateTime time;
-  final double weight;
-
-  const SiloVolumePoint({
-    required this.time,
-    required this.weight,
-  });
-}
-
-class SiloVolumeChart extends StatelessWidget {
-  final String title;
-  final List<SiloVolumePoint> points;
-  final int rawCount;
-  final String selectedTimeframe;
-  final List<String> timeframeOptions;
-  final ValueChanged<String> onTimeframeSelected;
-  final TransformationController transformationController;
-
-  const SiloVolumeChart({
-    super.key,
-    required this.title,
-    required this.points,
-    required this.rawCount,
-    required this.selectedTimeframe,
-    required this.timeframeOptions,
-    required this.onTimeframeSelected,
-    required this.transformationController,
-  });
-
-  String _formatTimeHms(DateTime dateTime) {
-    final local = dateTime.toLocal();
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    final second = local.second.toString().padLeft(2, '0');
-    return '$hour:$minute:$second';
-  }
-
-  String _formatWeightAxis(double value) {
-    if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(1)}k';
-    }
-    return value.toStringAsFixed(0);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final chartPoints = <FlSpot>[];
-    for (final point in points) {
-      final x = point.time.millisecondsSinceEpoch.toDouble();
-      final y = point.weight.toDouble();
-
-      if (x <= 0 || x.isNaN || x.isInfinite) continue;
-      if (y <= 0 || y.isNaN || y.isInfinite) continue;
-
-      chartPoints.add(FlSpot(x, y));
-    }
-
-    final hasData = chartPoints.isNotEmpty;
-    final validCount = chartPoints.length;
-    final minXRaw = hasData ? chartPoints.first.x : 0.0;
-    final maxXRaw = hasData ? chartPoints.last.x : 1.0;
-    final minX = minXRaw;
-    final maxX = (maxXRaw - minXRaw).abs() < 1
-      ? minXRaw + const Duration(minutes: 1).inMilliseconds
-      : maxXRaw;
-    final maxWeight = hasData
-      ? chartPoints.map((spot) => spot.y).reduce((a, b) => a > b ? a : b)
-      : 50000.0;
-    const minY = 0.0;
-    final maxY = hasData
-      ? (maxWeight * 1.15).clamp(1.0, double.infinity)
-      : 50000.0;
-    final xInterval = hasData
-      ? ((maxX - minX) / 4).clamp(1.0, double.infinity)
-      : 1.0;
-    final yInterval = ((maxY - minY) / 5).clamp(1.0, double.infinity);
-
-    return Card(
-      elevation: 3,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.orange.shade200),
-                  ),
-                  child: Text(
-                    'debug $rawCount/$validCount',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.orange.shade900,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: timeframeOptions.map((option) {
-                  final selected = option == selectedTimeframe;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(option),
-                      selected: selected,
-                      onSelected: (_) => onTimeframeSelected(option),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 320,
-              child: RepaintBoundary(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: hasData
-                      ? InteractiveViewer(
-                          transformationController: transformationController,
-                          minScale: 1.0,
-                          maxScale: 6.0,
-                          panEnabled: true,
-                          scaleEnabled: true,
-                          clipBehavior: Clip.hardEdge,
-                          child: LineChart(
-                            LineChartData(
-                              clipData: FlClipData.all(),
-                              baselineY: 0,
-                              minX: minX,
-                              maxX: maxX,
-                              minY: 0,
-                              maxY: maxY,
-                              gridData: FlGridData(
-                                show: true,
-                                drawVerticalLine: true,
-                                horizontalInterval: yInterval,
-                                verticalInterval: xInterval,
-                              ),
-                              titlesData: FlTitlesData(
-                                leftTitles: AxisTitles(
-                                  axisNameWidget: const Padding(
-                                    padding: EdgeInsets.only(bottom: 8),
-                                    child: Text(
-                                      'Khối lượng Silo',
-                                      style: TextStyle(fontSize: 11),
-                                    ),
-                                  ),
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 58,
-                                    getTitlesWidget: (value, meta) => SideTitleWidget(
-                                      axisSide: meta.axisSide,
-                                      child: Text(
-                                        _formatWeightAxis(value),
-                                        style: const TextStyle(fontSize: 10),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                bottomTitles: AxisTitles(
-                                  axisNameWidget: const Padding(
-                                    padding: EdgeInsets.only(top: 8),
-                                    child: Text(
-                                      'Thời gian',
-                                      style: TextStyle(fontSize: 11),
-                                    ),
-                                  ),
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    interval: xInterval,
-                                    reservedSize: 36,
-                                    getTitlesWidget: (value, meta) {
-                                      final dateTime = DateTime.fromMillisecondsSinceEpoch(
-                                        value.toInt(),
-                                      );
-
-                                      return SideTitleWidget(
-                                        axisSide: meta.axisSide,
-                                        child: Text(
-                                          _formatTimeHms(dateTime),
-                                          style: const TextStyle(fontSize: 10),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                                topTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                                rightTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                              ),
-                              borderData: FlBorderData(show: true),
-                              lineTouchData: LineTouchData(
-                                enabled: true,
-                                handleBuiltInTouches: true,
-                                touchTooltipData: LineTouchTooltipData(
-                                  fitInsideHorizontally: true,
-                                  fitInsideVertically: true,
-                                  getTooltipItems: (touchedSpots) {
-                                    return touchedSpots.map((spot) {
-                                      final spotTime =
-                                          DateTime.fromMillisecondsSinceEpoch(
-                                        spot.x.toInt(),
-                                      );
-
-                                      return LineTooltipItem(
-                                        '${spot.y.toStringAsFixed(2)} kg\n${_formatTimeHms(spotTime)}',
-                                        const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      );
-                                    }).toList();
-                                  },
-                                ),
-                              ),
-                              lineBarsData: [
-                                LineChartBarData(
-                                  spots: chartPoints,
-                                  isCurved: true,
-                                  preventCurveOverShooting: true,
-                                  gradient: LinearGradient(
-                                    colors: [Colors.blue.shade500, Colors.cyan.shade400],
-                                  ),
-                                  barWidth: 3,
-                                  isStrokeCapRound: true,
-                                  dotData: const FlDotData(show: false),
-                                  belowBarData: BarAreaData(
-                                    show: true,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.blue.withValues(alpha: 0.24),
-                                        Colors.blue.withValues(alpha: 0.04),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            duration: Duration.zero,
-                          ),
-                        )
-                      : const Center(
-                          child: Text(
-                            'Chưa có dữ liệu trong khung thời gian đã chọn',
-                            style: TextStyle(color: Colors.black54),
-                          ),
-                        ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
