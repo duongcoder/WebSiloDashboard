@@ -2,11 +2,11 @@ D:\WebSiloService\backend_publish\Backend.exe
 D:\WebSiloService\backend_publish\appsettings.Development.json
 D:\WebSiloService\backend_publish\appsettings.json
 D:\WebSiloService\backend_publish\Backend.dll
-D:\WebSiloService\backend_publish\Backend.deps.json
 D:\WebSiloService\backend_publish\Backend.runtimeconfig.json
 D:\WebSiloService\backend_publish\Backend.pdb
 D:\WebSiloService\backend_publish\Azure.Core.dll
 D:\WebSiloService\backend_publish\Azure.Identity.dll
+D:\WebSiloService\backend_publish\Microsoft.AspNetCore.Authentication.JwtBearer.dll
 D:\WebSiloService\backend_publish\Microsoft.AspNetCore.JsonPatch.dll
 D:\WebSiloService\backend_publish\Microsoft.AspNetCore.Mvc.NewtonsoftJson.dll
 D:\WebSiloService\backend_publish\Microsoft.AspNetCore.OpenApi.dll
@@ -53,3 +53,4 @@ D:\WebSiloService\backend_publish\runtimes\win\lib\net6.0\System.Drawing.Common.
 D:\WebSiloService\backend_publish\runtimes\win\lib\net6.0\System.Runtime.Caching.dll
 D:\WebSiloService\backend_publish\runtimes\win\lib\net6.0\System.Security.Cryptography.ProtectedData.dll
 D:\WebSiloService\backend_publish\runtimes\win\lib\net6.0\System.Windows.Extensions.dll
+D:\WebSiloService\backend_publish\Backend.deps.json

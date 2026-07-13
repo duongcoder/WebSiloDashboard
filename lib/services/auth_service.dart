@@ -7,21 +7,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 // --- Cấu hình Base URL Linh Hoạt ---
 String get baseUrl {
   if (!kReleaseMode) {
-    // Khi đang Code/Dev: Gọi thẳng vào Backend .NET đang chạy dưới máy Local
-    return 'http://localhost:5294'; 
-  }
-  
-  try {
-    // Khi deploy máy khách (Release): Tự động bốc Domain/IP hiện tại của trình duyệt
-    final origin = Uri.base.origin;
-    
-    // MẸO TỐI ƯU: Nếu bạn tách riêng Frontend và Backend chạy ở 2 Port khác nhau trên máy khách 
-    // (Ví dụ Backend cố định chạy port 8089), hãy bỏ comment dòng phía dưới:
-    // return origin.replaceAll(RegExp(r':\d+$'), '') + ':8089';
-    
-    return origin;
-  } catch (_) {
     return 'http://localhost:5294';
+  }
+
+  try {
+    // Trích xuất IP động từ trình duyệt máy khách
+    final Uri currentUri = Uri.base;
+    final String host = currentUri.host;
+    final String scheme = currentUri.scheme;
+    
+    // BẮT BUỘC: Ép request đi đúng vào Port 5294 của Backend .NET trên IIS
+    return '$scheme://$host:5294';
+  } catch (e) {
+    return 'http://192.168.1.74:5294'; // Khôi phục dự phòng nếu lỗi
   }
 }
 
