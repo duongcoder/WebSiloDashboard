@@ -135,6 +135,7 @@ late signalr_core.HubConnection hubConnection;
   Timer? _currentUserSyncTimer;
   DateTime? _lastReportExportAt;
   bool _isFetchingPumpPlan = false;
+  DateTime? _lastRealtimeWeightUpdatedAt;
 
   @override
   void initState() {
@@ -744,7 +745,32 @@ late signalr_core.HubConnection hubConnection;
     return 'Silo $siloId';
   }
 
-  double _getLatestWeightForSilo(int siloId) {
+  Silo? _findSiloById(int siloId) {
+    for (var i = 0; i < _silos.length; i++) {
+      final silo = _silos[i];
+      final id = _extractSiloId(silo.id, fallback: i + 1);
+      if (id == siloId) return silo;
+    }
+    return null;
+  }
+
+  double _getSiloNoiseThreshold(int siloId) {
+    final configured = _siloNoiseThresholdConfig[siloId];
+    if (configured != null) return configured;
+
+    if (_selectedSettingsSiloId == siloId) {
+      return _settingsNoiseThresholdKg;
+    }
+
+    return 5.0;
+  }
+
+  double _getRawLiveWeightForSilo(int siloId) {
+    // Ưu tiên nguồn realtime đang được tab Tổng quan dùng cho silo active.
+    if (siloId == _getActiveSiloId() && _currentWeight != null) {
+      return _currentWeight!;
+    }
+
     for (var i = _siloHistory.length - 1; i >= 0; i--) {
       final row = _siloHistory[i];
       if (row.idScale == siloId) {
@@ -752,15 +778,82 @@ late signalr_core.HubConnection hubConnection;
       }
     }
 
-    return _currentWeight ?? 0.0;
+    final silo = _findSiloById(siloId);
+    if (silo != null) {
+      return silo.weight;
+    }
+
+    return 0.0;
+  }
+
+  double _normalizeWeightForDisplay({
+    required int siloId,
+    required double rawWeight,
+  }) {
+    var value = rawWeight;
+
+    // Đồng bộ xử lý ngưỡng nhiễu giữa các tab.
+    final noiseThreshold = _getSiloNoiseThreshold(siloId);
+    if (value.abs() < noiseThreshold) {
+      value = 0.0;
+    }
+
+    // Đồng bộ tỷ lệ theo cấu hình Cân Max.
+    final maxWeight = _getSiloMaxWeight(siloId);
+    return value.clamp(0.0, maxWeight);
+  }
+
+  double _getDisplayWeightForSilo(int siloId) {
+    final raw = _getRawLiveWeightForSilo(siloId);
+    return _normalizeWeightForDisplay(siloId: siloId, rawWeight: raw);
   }
 
   DateTime? _getLatestTimestampForSilo(int siloId) {
+    DateTime? historyTimestamp;
     for (var i = _siloHistory.length - 1; i >= 0; i--) {
       final row = _siloHistory[i];
       if (row.idScale == siloId) {
-        return row.time;
+        historyTimestamp = row.time;
+        break;
       }
+    }
+
+    if (siloId == _getActiveSiloId()) {
+      return _lastRealtimeWeightUpdatedAt ?? historyTimestamp;
+    }
+
+    return historyTimestamp;
+  }
+
+  DateTime? _extractRealtimeTimestamp(dynamic payload) {
+    DateTime? parseFrom(dynamic raw) {
+      if (raw == null) return null;
+      if (raw is int) {
+        final isMillis = raw.abs() > 9999999999;
+        final millis = isMillis ? raw : raw * 1000;
+        return DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
+      }
+      if (raw is String) {
+        final parsed = DateTime.tryParse(raw);
+        if (parsed != null) return parsed.toLocal();
+        final asInt = int.tryParse(raw);
+        if (asInt != null) {
+          final isMillis = asInt.abs() > 9999999999;
+          final millis = isMillis ? asInt : asInt * 1000;
+          return DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
+        }
+      }
+      return null;
+    }
+
+    if (payload is Map<String, dynamic>) {
+      return parseFrom(
+        payload['dateTime'] ??
+            payload['time'] ??
+            payload['timestamp'] ??
+            payload['Time'] ??
+            payload['DateTime'],
+      );
     }
 
     return null;
@@ -923,17 +1016,22 @@ hubConnection = signalr_core.HubConnectionBuilder()
         final raw = args[0];
 
         if (raw is Map<String, dynamic>) {
+          final timestamp = _extractRealtimeTimestamp(raw) ?? DateTime.now();
           setState(() {
             _currentWeight = (raw['value'] as num).toDouble();
+            _lastRealtimeWeightUpdatedAt = timestamp;
           });
         } else if (raw is String) {
           final data = jsonDecode(raw);
+          final timestamp = _extractRealtimeTimestamp(data) ?? DateTime.now();
           setState(() {
             _currentWeight = (data['value'] as num).toDouble();
+            _lastRealtimeWeightUpdatedAt = timestamp;
           });
         } else if (raw is num) {
           setState(() {
             _currentWeight = raw.toDouble();
+            _lastRealtimeWeightUpdatedAt = DateTime.now();
           });
         }
       });
@@ -1666,7 +1764,8 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
             return SiloModule(
               id: silo.id,
-              currentWeight: _currentWeight,
+              currentWeight: _getDisplayWeightForSilo(siloId),
+              lastUpdatedAt: _getLatestTimestampForSilo(siloId),
               maxWeight: _getSiloMaxWeight(siloId),
               level: silo.level,
               indicators: indicatorsForSilo,
@@ -1903,9 +2002,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
       );
     }
 
-    final monitorWeight = _getLatestWeightForSilo(selectedMonitorSiloId);
+    final monitorWeight = _getDisplayWeightForSilo(selectedMonitorSiloId);
     final monitorUpdatedAt = _getLatestTimestampForSilo(selectedMonitorSiloId);
-    final monitorName = _getMonitorSiloName(selectedMonitorSiloId);
+    final monitorSilo = _findSiloById(selectedMonitorSiloId);
+    final monitorName = monitorSilo?.id ?? _getMonitorSiloName(selectedMonitorSiloId);
     final monitorChartData = _buildSiloMassPoints(siloId: selectedMonitorSiloId);
     final monitorRawCount = _siloHistory
       .where((row) => row.idScale == selectedMonitorSiloId)
