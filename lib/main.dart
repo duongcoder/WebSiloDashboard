@@ -74,6 +74,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
+  static const int _totalSiloCount = 8;
   static const int _siloMonitorTabIndex = 1;
   static const int _pumpPlanTabIndex = 2;
   static const int _reportTabIndex = 5;
@@ -708,17 +709,15 @@ late signalr_core.HubConnection hubConnection;
   }
 
   int _getActiveSiloId() {
-    if (_silos.isEmpty) return 1;
-    return _extractSiloId(_silos.first.id, fallback: 1);
+    final ids = _getSettingsSiloIds();
+    if (ids.isEmpty) return 1;
+    return ids.first;
   }
 
   List<int> _getSettingsSiloIds() {
     final ids = <int>[];
-    for (var i = 0; i < _silos.length; i++) {
-      final id = _extractSiloId(_silos[i].id, fallback: i + 1);
-      if (!ids.contains(id)) {
-        ids.add(id);
-      }
+    for (var id = 1; id <= _totalSiloCount; id++) {
+      ids.add(id);
     }
     return ids;
   }
@@ -1738,6 +1737,8 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
     final chartPoints = _buildSiloMassPoints();
 
+    final overviewSiloIds = _getSettingsSiloIds();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1749,10 +1750,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
           mainAxisSpacing: 12,
           // Giữ card Silo đủ cao để nội dung không bị dồn khi responsive desktop.
           childAspectRatio: moduleCardAspectRatio,
-          children: _silos.asMap().entries.map((entry) {
-            final idx = entry.key;
-            final silo = entry.value;
-            final siloId = _extractSiloId(silo.id, fallback: idx + 1);
+          children: overviewSiloIds.map((siloId) {
+            final idx = siloId - 1;
+            final silo = _findSiloById(siloId);
+            final siloName = silo?.id ?? 'Silo $siloId';
 
             final indicatorsForSilo = _indicators.isNotEmpty
                 ? <Indicator>[_indicators[idx % _indicators.length]]
@@ -1763,16 +1764,16 @@ hubConnection = signalr_core.HubConnectionBuilder()
                 : <Controller>[];
 
             return SiloModule(
-              id: silo.id,
+              id: siloName,
               currentWeight: _getDisplayWeightForSilo(siloId),
               lastUpdatedAt: _getLatestTimestampForSilo(siloId),
               maxWeight: _getSiloMaxWeight(siloId),
-              level: silo.level,
+              level: silo?.level ?? 0,
               indicators: indicatorsForSilo,
               controllers: controllersForSilo,
               silos: _silos,
             );
-          }).toList(),
+          }).toList(growable: false),
         ),
         const SizedBox(height: 20),
         SiloMassChart(
