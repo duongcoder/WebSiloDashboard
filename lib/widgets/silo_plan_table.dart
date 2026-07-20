@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 
 class SiloPlanTable extends StatelessWidget {
   final String title;
-  final List<int> pumpSiloIds;
-  final int? selectedPumpPlanSiloId;
+  final List<int> siloIds;
+  final int? selectedSiloId;
   final List<Map<String, String>> filteredRows;
   final List<Map<String, String>> visibleRows;
   final ScrollController scrollController;
-  final ValueChanged<int?> onPlanSiloChanged;
+  final ValueChanged<int?>? onSiloChanged;
   final Future<void> Function() onExportExcel;
   final Future<void> Function() onAddPlanClick;
   final void Function(Map<String, String> row) onDeletePlan;
@@ -17,12 +17,12 @@ class SiloPlanTable extends StatelessWidget {
   const SiloPlanTable({
     super.key,
     required this.title,
-    required this.pumpSiloIds,
-    required this.selectedPumpPlanSiloId,
+    required this.siloIds,
+    required this.selectedSiloId,
     required this.filteredRows,
     required this.visibleRows,
     required this.scrollController,
-    required this.onPlanSiloChanged,
+    required this.onSiloChanged,
     required this.onExportExcel,
     required this.onAddPlanClick,
     required this.onDeletePlan,
@@ -73,9 +73,9 @@ class SiloPlanTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final planTitleText = selectedPumpPlanSiloId == null
+    final planTitleText = selectedSiloId == null
         ? '$title tổng'
-        : '$title silo $selectedPumpPlanSiloId';
+      : '$title silo $selectedSiloId';
 
     return Card(
       elevation: 4,
@@ -118,21 +118,21 @@ class SiloPlanTable extends StatelessWidget {
                             ),
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<int?>(
-                                value: selectedPumpPlanSiloId,
+                                value: selectedSiloId,
                                 isDense: true,
                                 items: [
                                   const DropdownMenuItem<int?>(
                                     value: null,
                                     child: Text('Tổng các Silo'),
                                   ),
-                                  ...pumpSiloIds.map(
+                                  ...siloIds.map(
                                     (id) => DropdownMenuItem<int?>(
                                       value: id,
                                       child: Text('Silo $id'),
                                     ),
                                   ),
                                 ],
-                                onChanged: onPlanSiloChanged,
+                                onChanged: onSiloChanged,
                               ),
                             ),
                           ),

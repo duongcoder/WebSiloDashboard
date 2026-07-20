@@ -4,20 +4,20 @@ import 'package:flutter/material.dart';
 import '../services/statistics_report_helper.dart';
 
 class SiloReportTable extends StatelessWidget {
-  final List<int> statisticsSiloIds;
-  final int? selectedStatisticsSiloId;
+  final List<int> siloIds;
+  final int? selectedSiloId;
   final List<CompressedStatisticsReportItem> rows;
   final ScrollController scrollController;
-  final ValueChanged<int?> onStatisticsSiloChanged;
+  final ValueChanged<int?>? onSiloChanged;
   final Future<void> Function() onExportPressed;
 
   const SiloReportTable({
     super.key,
-    required this.statisticsSiloIds,
-    required this.selectedStatisticsSiloId,
+    required this.siloIds,
+    required this.selectedSiloId,
     required this.rows,
     required this.scrollController,
-    required this.onStatisticsSiloChanged,
+    required this.onSiloChanged,
     required this.onExportPressed,
   });
 
@@ -54,9 +54,9 @@ class SiloReportTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final reportTitleText = selectedStatisticsSiloId == null
+    final reportTitleText = selectedSiloId == null
         ? 'Báo cáo thống kê tổng'
-        : 'Báo cáo thống kê silo $selectedStatisticsSiloId';
+      : 'Báo cáo thống kê silo $selectedSiloId';
 
     return Card(
       elevation: 4,
@@ -99,21 +99,21 @@ class SiloReportTable extends StatelessWidget {
                             ),
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<int?>(
-                                value: selectedStatisticsSiloId,
+                                value: selectedSiloId,
                                 isDense: true,
                                 items: [
                                   const DropdownMenuItem<int?>(
                                     value: null,
                                     child: Text('Tổng các Silo'),
                                   ),
-                                  ...statisticsSiloIds.map(
+                                  ...siloIds.map(
                                     (id) => DropdownMenuItem<int?>(
                                       value: id,
                                       child: Text('Silo $id'),
                                     ),
                                   ),
                                 ],
-                                onChanged: onStatisticsSiloChanged,
+                                onChanged: onSiloChanged,
                               ),
                             ),
                           ),

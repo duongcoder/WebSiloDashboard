@@ -287,10 +287,11 @@ late signalr_core.HubConnection hubConnection;
         _userAccountsError = 'Không tải được danh sách tài khoản: $e';
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isLoadingUserAccounts = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoadingUserAccounts = false;
+        });
+      }
     }
   }
 
@@ -537,47 +538,149 @@ late signalr_core.HubConnection hubConnection;
     });
   }
 
-  Future<void> _fetchPumpPlan() async {
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.red,
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  List<int> _buildSystemSiloIds() {
+    return List<int>.generate(_totalSiloCount, (index) => index + 1);
+  }
+
+  int? _normalizeSelectedSiloId(int? siloId) {
+    if (siloId == null || siloId <= 0) {
+      return null;
+    }
+    return siloId;
+  }
+
+  Future<void> _fetchPumpPlan({int? siloId}) async {
     if (_isFetchingPumpPlan) return;
     _isFetchingPumpPlan = true;
 
     try {
+      final normalizedSiloId = _normalizeSelectedSiloId(siloId);
+      final token = await AuthService().getToken();
+      final uri = Uri.parse('${AppConfig.baseUrl}/Schedulers/GetSchedulers').replace(
+        queryParameters: normalizedSiloId == null
+            ? null
+            : <String, String>{'siloId': '$normalizedSiloId'},
+      );
       final response = await http
           .get(
-            Uri.parse('${AppConfig.baseUrl}/Schedulers/GetSchedulers'),
+            uri,
+            headers: {
+              'Accept': 'application/json; charset=utf-8',
+              'Authorization': 'Bearer $token',
+            },
           )
           .timeout(const Duration(seconds: 12));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final schedulersRaw = data is Map<String, dynamic>
-            ? data['schedulers']
-            : null;
-        final List<dynamic> schedulers =
-            schedulersRaw is List ? schedulersRaw : <dynamic>[];
-
-        if (!mounted) return;
-        setState(() {
-          _pumpPlanRows = schedulers.map((item) {
-            final map = item is Map<String, dynamic>
-                ? item
-                : <String, dynamic>{};
-
-            return {
-              'time': _formatPumpPlanTime(map['timeStart']),
-              'silo': 'Silo ${(map['id_relay'] ?? '').toString()}',
-              'material': (map['des'] ?? '').toString(),
-              'qty': (map['weight'] ?? '').toString(),
-              'status': _mapStatus(_parseStatus(map['status'])),
-            };
-          }).toList();
-        });
+      if (response.statusCode != 200) {
+        throw Exception('Không tải được danh sách kế hoạch: ${response.statusCode}');
       }
+
+      final data = jsonDecode(response.body);
+      final schedulersRaw = data is Map<String, dynamic>
+          ? data['schedulers']
+          : null;
+      final List<dynamic> schedulers =
+          schedulersRaw is List ? schedulersRaw : <dynamic>[];
+
+      final rows = schedulers.map((item) {
+        final map = item is Map<String, dynamic> ? item : <String, dynamic>{};
+
+        return {
+          'time': _formatPumpPlanTime(map['timeStart']),
+          'silo': 'Silo ${(map['id_relay'] ?? '').toString()}',
+          'material': (map['des'] ?? '').toString(),
+          'qty': (map['weight'] ?? '').toString(),
+          'status': _mapStatus(_parseStatus(map['status'])),
+        };
+      }).toList(growable: false);
+
+      if (!mounted) return;
+      setState(() {
+        _pumpPlanRows = rows;
+      });
     } catch (e) {
       debugPrint('Error fetching pump plan: $e');
+      _showErrorSnackBar('Không tải được dữ liệu kế hoạch: $e');
     } finally {
       _isFetchingPumpPlan = false;
     }
+  }
+
+  Future<void> _fetchStatisticsReport({int? siloId}) async {
+    try {
+      final normalizedSiloId = _normalizeSelectedSiloId(siloId);
+      final token = await AuthService().getToken();
+      final uri = Uri.parse('${AppConfig.baseUrl}/Scales/GetHistory').replace(
+        queryParameters: <String, String>{
+          'sync': '-1',
+          'Id': '-1',
+          if (normalizedSiloId != null) 'siloId': '$normalizedSiloId',
+        },
+      );
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'Accept': 'application/json; charset=utf-8',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode != 200) {
+        throw Exception('Không tải được dữ liệu báo cáo: ${response.statusCode}');
+      }
+
+      final decoded = jsonDecode(response.body);
+      final rows = SiloHistoryModel.parseListFromResponse(decoded, defaultId: -1)
+        ..sort((a, b) => a.id.compareTo(b.id));
+
+      if (!mounted) return;
+      setState(() {
+        _siloHistory = rows;
+        if (rows.isNotEmpty) {
+          _lastProcessedId = rows.last.id;
+        }
+      });
+    } catch (e) {
+      debugPrint('Error fetching statistics report: $e');
+      _showErrorSnackBar('Không tải được dữ liệu báo cáo: $e');
+    }
+  }
+
+  Future<void> _handlePumpPlanSiloChanged(int? siloId) async {
+    final normalizedSiloId = _normalizeSelectedSiloId(siloId);
+
+    if (!mounted) return;
+    setState(() {
+      _selectedPumpPlanSiloId = normalizedSiloId;
+    });
+
+    await _fetchPumpPlan(siloId: normalizedSiloId);
+  }
+
+  Future<void> _handleStatisticsSiloChanged(int? siloId) async {
+    final normalizedSiloId = _normalizeSelectedSiloId(siloId);
+
+    if (!mounted) return;
+    setState(() {
+      _selectedStatisticsSiloId = normalizedSiloId;
+    });
+
+    await _fetchStatisticsReport(siloId: normalizedSiloId);
   }
 
   String _mapStatus(int status) {
@@ -1168,23 +1271,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   }
 
   List<int> _getStatisticsSiloIds() {
-    final ids = <int>{};
-
-    for (var i = 0; i < _silos.length; i++) {
-      final id = _extractSiloId(_silos[i].id, fallback: i + 1);
-      if (id > 0) {
-        ids.add(id);
-      }
-    }
-
-    for (final row in _siloHistory) {
-      if (row.idScale > 0) {
-        ids.add(row.idScale);
-      }
-    }
-
-    final list = ids.toList()..sort();
-    return list;
+    return _buildSystemSiloIds();
   }
 
   int? _getEffectiveStatisticsSiloId() {
@@ -1208,18 +1295,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
   }
 
   List<int> _getPumpPlanSiloIds(List<Map<String, String>> rows) {
-    final ids = <int>{};
-
-    for (final row in rows) {
-      final siloText = (row['silo'] ?? '').trim();
-      final id = _tryExtractPositiveInt(siloText);
-      if (id != null) {
-        ids.add(id);
-      }
-    }
-
-    final list = ids.toList()..sort();
-    return list;
+    return _buildSystemSiloIds();
   }
 
   int? _getEffectivePumpPlanSiloId(List<Map<String, String>> rows) {
@@ -1864,15 +1940,13 @@ hubConnection = signalr_core.HubConnectionBuilder()
     // Tách phần UI thành widget dùng chung, giữ toàn bộ state/logic tại Dashboard.
     return SiloPlanTable(
       title: 'Danh sách kế hoạch',
-      pumpSiloIds: pumpSiloIds,
-      selectedPumpPlanSiloId: selectedPumpPlanSiloId,
+      siloIds: pumpSiloIds,
+      selectedSiloId: selectedPumpPlanSiloId,
       filteredRows: filteredRows,
       visibleRows: visibleRows,
       scrollController: _pumpPlanTableScrollController,
-      onPlanSiloChanged: (value) {
-        setState(() {
-          _selectedPumpPlanSiloId = value;
-        });
+      onSiloChanged: (value) async {
+        await _handlePumpPlanSiloChanged(value);
       },
       onExportExcel: () async {
         final messenger = ScaffoldMessenger.of(context);
@@ -1887,10 +1961,11 @@ hubConnection = signalr_core.HubConnectionBuilder()
         );
       },
       onAddPlanClick: () async {
-        final messenger = ScaffoldMessenger.of(context);
         final result = await _showAddPumpPlanDialog();
 
         if (result == null || !mounted) return;
+
+        final messenger = ScaffoldMessenger.of(context);
 
         final time = result['time'] ?? '';
         final silo = result['silo'] ?? '';
@@ -1903,9 +1978,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
             material.isEmpty ||
             qty.isEmpty ||
             status.isEmpty) {
-          messenger.showSnackBar(
-            const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin')),
-          );
+          _showErrorSnackBar('Vui lòng nhập đầy đủ thông tin');
           return;
         }
 
@@ -1944,14 +2017,12 @@ hubConnection = signalr_core.HubConnectionBuilder()
         .take(20)
         .toList();
     return SiloReportTable(
-      statisticsSiloIds: statisticsSiloIds,
-      selectedStatisticsSiloId: selectedStatisticsSiloId,
+      siloIds: statisticsSiloIds,
+      selectedSiloId: selectedStatisticsSiloId,
       rows: rows,
       scrollController: _statisticsTableScrollController,
-      onStatisticsSiloChanged: (value) {
-        setState(() {
-          _selectedStatisticsSiloId = value;
-        });
+      onSiloChanged: (value) async {
+        await _handleStatisticsSiloChanged(value);
       },
       onExportPressed: () async {
         await _exportStatisticsReport(isAuto: false);
