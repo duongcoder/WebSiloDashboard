@@ -11,7 +11,7 @@ import 'package:signalr_core/signalr_core.dart' as signalr_core;
 
 
 
-import 'config/app_config.dart';
+import 'utils/app_config.dart';
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
@@ -77,9 +77,12 @@ class _DashboardPageState extends State<DashboardPage> {
   static const int _totalSiloCount = 8;
   static const int _siloMonitorTabIndex = 1;
   static const int _pumpPlanTabIndex = 2;
+  static const int _historyTabIndex = 3;
+  static const int _warningTabIndex = 4;
   static const int _reportTabIndex = 5;
   static const int _settingsTabIndex = 6;
   static const int _userManagementTabIndex = 7;
+
   static const double _defaultSiloMaxWeight = 100.0;
   static const Map<String, Duration> _timeframeDurations = {
     '1ph': Duration(minutes: 1),
@@ -120,22 +123,18 @@ late signalr_core.HubConnection hubConnection;
   final Map<int, double> _siloMaxConfig = <int, double>{};
   int? _selectedSettingsSiloId;
   int? _selectedMonitorSiloId;
-  int? _selectedPumpPlanSiloId;
   int? _selectedStatisticsSiloId;
   String? _settingsMaxWeightError;
   double _settingsNoiseThresholdKg = 5.0;
   final TextEditingController _settingsMaxWeightController =
       TextEditingController(text: '100');
 
-  List<Map<String, String>> _pumpPlanRows = [];
   List<Map<String, dynamic>> _userAccounts = [];
   bool _isLoadingUserAccounts = false;
   String? _userAccountsError;
-  Timer? _pumpTimer;
   Timer? _autoReportExportTimer;
   Timer? _currentUserSyncTimer;
   DateTime? _lastReportExportAt;
-  bool _isFetchingPumpPlan = false;
   DateTime? _lastRealtimeWeightUpdatedAt;
 
   @override
@@ -148,10 +147,6 @@ late signalr_core.HubConnection hubConnection;
     _initSignalR();
     _initializeDashboard();
 
-    _pumpTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _fetchPumpPlan();
-    });
-
     _autoReportExportTimer = Timer.periodic(const Duration(hours: 1), (_) {
       _maybeAutoExportReport();
     });
@@ -159,7 +154,6 @@ late signalr_core.HubConnection hubConnection;
 
   @override
   void dispose() {
-    _pumpTimer?.cancel();
     _autoReportExportTimer?.cancel();
     _currentUserSyncTimer?.cancel();
     _historySubscription?.cancel();
@@ -563,63 +557,6 @@ late signalr_core.HubConnection hubConnection;
     return siloId;
   }
 
-  Future<void> _fetchPumpPlan({int? siloId}) async {
-    if (_isFetchingPumpPlan) return;
-    _isFetchingPumpPlan = true;
-
-    try {
-      final normalizedSiloId = _normalizeSelectedSiloId(siloId);
-      final token = await AuthService().getToken();
-      final uri = Uri.parse('${AppConfig.baseUrl}/Schedulers/GetSchedulers').replace(
-        queryParameters: normalizedSiloId == null
-            ? null
-            : <String, String>{'siloId': '$normalizedSiloId'},
-      );
-      final response = await http
-          .get(
-            uri,
-            headers: {
-              'Accept': 'application/json; charset=utf-8',
-              'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 12));
-
-      if (response.statusCode != 200) {
-        throw Exception('Không tải được danh sách kế hoạch: ${response.statusCode}');
-      }
-
-      final data = jsonDecode(response.body);
-      final schedulersRaw = data is Map<String, dynamic>
-          ? data['schedulers']
-          : null;
-      final List<dynamic> schedulers =
-          schedulersRaw is List ? schedulersRaw : <dynamic>[];
-
-      final rows = schedulers.map((item) {
-        final map = item is Map<String, dynamic> ? item : <String, dynamic>{};
-
-        return {
-          'time': _formatPumpPlanTime(map['timeStart']),
-          'silo': 'Silo ${(map['id_relay'] ?? '').toString()}',
-          'material': (map['des'] ?? '').toString(),
-          'qty': (map['weight'] ?? '').toString(),
-          'status': _mapStatus(_parseStatus(map['status'])),
-        };
-      }).toList(growable: false);
-
-      if (!mounted) return;
-      setState(() {
-        _pumpPlanRows = rows;
-      });
-    } catch (e) {
-      debugPrint('Error fetching pump plan: $e');
-      _showErrorSnackBar('Không tải được dữ liệu kế hoạch: $e');
-    } finally {
-      _isFetchingPumpPlan = false;
-    }
-  }
-
   Future<void> _fetchStatisticsReport({int? siloId}) async {
     try {
       final normalizedSiloId = _normalizeSelectedSiloId(siloId);
@@ -661,17 +598,6 @@ late signalr_core.HubConnection hubConnection;
     }
   }
 
-  Future<void> _handlePumpPlanSiloChanged(int? siloId) async {
-    final normalizedSiloId = _normalizeSelectedSiloId(siloId);
-
-    if (!mounted) return;
-    setState(() {
-      _selectedPumpPlanSiloId = normalizedSiloId;
-    });
-
-    await _fetchPumpPlan(siloId: normalizedSiloId);
-  }
-
   Future<void> _handleStatisticsSiloChanged(int? siloId) async {
     final normalizedSiloId = _normalizeSelectedSiloId(siloId);
 
@@ -681,25 +607,6 @@ late signalr_core.HubConnection hubConnection;
     });
 
     await _fetchStatisticsReport(siloId: normalizedSiloId);
-  }
-
-  String _mapStatus(int status) {
-    switch (status) {
-      case 0:
-        return 'Sẵn sàng';
-      case 1:
-        return 'Đang bơm';
-      case 2:
-        return 'Đã xong';
-      default:
-        return 'Chờ';
-    }
-  }
-
-  int _parseStatus(dynamic value) {
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? -1;
-    return -1;
   }
 
   Future<void> saveSiloConfig(int siloId, double maxWeight) async {
@@ -748,16 +655,6 @@ late signalr_core.HubConnection hubConnection;
     if (parsed != null && parsed > 0) return parsed;
 
     return fallback ?? 1;
-  }
-
-  int? _tryExtractPositiveInt(String text) {
-    final direct = int.tryParse(text.trim());
-    if (direct != null && direct > 0) return direct;
-
-    final extracted = RegExp(r'\d+').firstMatch(text)?.group(0);
-    final parsed = int.tryParse(extracted ?? '');
-    if (parsed != null && parsed > 0) return parsed;
-    return null;
   }
 
   Future<void> _loadAllSiloConfigs(List<Silo> silos) async {
@@ -999,25 +896,11 @@ late signalr_core.HubConnection hubConnection;
     });
   }
 
-  String _formatPumpPlanTime(dynamic value) {
-    final raw = (value ?? '').toString().trim();
-    if (raw.isEmpty) return '';
-
-    try {
-      final parsed = DateTime.tryParse(raw);
-      if (parsed == null) return raw;
-      return DateFormat('HH:mm:ss - dd/MM/yyyy').format(parsed.toLocal());
-    } catch (_) {
-      return raw;
-    }
-  }
-
   Future<void> _loadInitialData() async {
     await Future.wait([
       _loadSilos(),
       _loadIndicators(),
       _loadControllers(),
-      _fetchPumpPlan(),
     ]);
 
     // Scale API là nguồn ngoài, chỉ dùng bổ sung nếu backend local chưa có dữ liệu silo.
@@ -1294,33 +1177,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return _siloHistory.where((row) => row.idScale == selectedSiloId).toList();
   }
 
-  List<int> _getPumpPlanSiloIds(List<Map<String, String>> rows) {
-    return _buildSystemSiloIds();
-  }
-
-  int? _getEffectivePumpPlanSiloId(List<Map<String, String>> rows) {
-    final selected = _selectedPumpPlanSiloId;
-    if (selected == null) return null;
-
-    final ids = _getPumpPlanSiloIds(rows);
-    if (ids.contains(selected)) {
-      return selected;
-    }
-    return null;
-  }
-
-  List<Map<String, String>> _getFilteredPumpPlanRows(List<Map<String, String>> rows) {
-    final selectedSiloId = _getEffectivePumpPlanSiloId(rows);
-    if (selectedSiloId == null) {
-      return rows;
-    }
-
-    return rows.where((row) {
-      final siloText = (row['silo'] ?? '').trim();
-      return _tryExtractPositiveInt(siloText) == selectedSiloId;
-    }).toList();
-  }
-
   List<Map<String, String>> _buildReportExportRows() {
     final compressed = generateCompressedStatisticsReport(_buildStatisticsHistorySource());
     final visibleRows = compressed.reversed.take(10).toList();
@@ -1397,31 +1253,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
     }
   }
 
-  Color _statusColor(String status) {
-    final s = status.toLowerCase();
-
-    if (s.contains('đang hoạt động') || s.contains('dang hoat dong')) {
-      return Colors.green.shade200;
-    }
-    if (s.contains('dừng hoạt động') || s.contains('dung hoat dong')) {
-      return Colors.red.shade200;
-    }
-
-    if (s.contains('sẵn') || s.contains('san') || s.contains('sẵn sàng')) {
-      return Colors.green.shade200;
-    }
-    if (s.contains('chờ') || s.contains('cho')) return Colors.yellow.shade200;
-    if (s.contains('lỗi') || s.contains('loi')) return Colors.red.shade200;
-    if (s.contains('đang bơm') || s.contains('dang bom')) {
-      return Colors.green.shade200;
-    }
-    if (s.contains('đã xong') || s.contains('da xong')) {
-      return Colors.blue.shade200;
-    }
-
-    return Colors.grey.shade200;
-  }
-
   Widget _buildInfoBadge(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1452,45 +1283,50 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          color: selected ? Colors.blue.shade50 : Colors.transparent,
-          border: Border.all(
-            color: selected ? Colors.blue.shade300 : Colors.transparent,
-            width: 1.2,
-          ),
+          borderRadius: BorderRadius.circular(12),
+          color: selected ? const Color(0xFF2563EB) : Colors.transparent,
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF2563EB).withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected ? Colors.blue.shade700 : Colors.blue.shade100,
-              ),
-              child: Icon(
-                icon,
-                color: selected ? Colors.white : Colors.blue.shade800,
-                size: 20,
-              ),
+            Icon(
+              icon,
+              color: selected ? Colors.white : const Color(0xFF94A3B8),
+              size: 20,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? Colors.blue.shade900 : Colors.black87,
+                  fontSize: 14,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? Colors.white : const Color(0xFFCBD5E1),
                 ),
               ),
             ),
             if (selected)
-              Icon(Icons.chevron_right, color: Colors.blue.shade700, size: 18),
+              Container(
+                width: 6,
+                height: 6,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white,
+                ),
+              ),
           ],
         ),
       ),
@@ -1499,19 +1335,19 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   List<Map<String, dynamic>> get _sidebarMenuConfig {
     final items = <Map<String, dynamic>>[
-      {'icon': Icons.dashboard_customize, 'label': 'Tổng quan'},
+      {'icon': Icons.grid_view_rounded, 'label': 'Tổng quan'},
       // Tab giám sát silo luôn mở cho cả Admin và User.
-      {'icon': Icons.storage, 'label': 'Giám sát silo'},
-      {'icon': Icons.autorenew, 'label': 'Kế hoạch bơm/xả'},
-      {'icon': Icons.history, 'label': 'Lịch sử'},
+      {'icon': Icons.sensors_rounded, 'label': 'Giám sát silo'},
+      {'icon': Icons.monitor_weight_outlined, 'label': 'Trạng thái Silo'},
+      {'icon': Icons.history_toggle_off_rounded, 'label': 'Lịch sử'},
       {'icon': Icons.warning_amber_rounded, 'label': 'Cảnh báo'},
-      {'icon': Icons.description, 'label': 'Báo cáo'},
-      {'icon': Icons.settings_applications, 'label': 'Cài đặt'},
+      {'icon': Icons.description_outlined, 'label': 'Báo cáo'},
+      {'icon': Icons.settings_outlined, 'label': 'Cài đặt'},
     ];
 
     // Chỉ giữ phân quyền admin cho menu quản lý người dùng.
     if (_isAdmin) {
-      items.add({'icon': Icons.group, 'label': 'Quản lý người dùng'});
+      items.add({'icon': Icons.people_alt_outlined, 'label': 'Quản lý người dùng'});
     }
 
     return items;
@@ -1546,7 +1382,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       );
 
       if (i < _sidebarMenuConfig.length - 1) {
-        widgets.add(const SizedBox(height: 10));
+        widgets.add(const SizedBox(height: 6));
       }
     }
 
@@ -1557,45 +1393,84 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return Container(
       width: sidebarWidth,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.blue.shade100),
+        color: const Color(0xFF0B1B3D),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Column(
         children: [
           Container(
-            height: 78,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(18),
-                topRight: Radius.circular(18),
-              ),
-              gradient: LinearGradient(
-                colors: [Colors.blue.shade700, Colors.blue.shade500],
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFF1E293B)),
               ),
             ),
-            child: const Center(
-              child: Text(
-                'Menu',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF2563EB), Color(0xFF06B6D4)],
+                    ),
+                  ),
+                  child: const Icon(Icons.insights, color: Colors.white, size: 24),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'FeedFarm',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text(
+                            'Silo Dashboard',
+                            style: TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
               children: _buildSidebarMenuItems(closeDrawerAfterTap: false),
             ),
           ),
@@ -1607,35 +1482,88 @@ hubConnection = signalr_core.HubConnectionBuilder()
   Widget _buildStatCard(
     String title,
     String value,
-    Color color, {
+    Color color,
+    IconData icon, {
     bool compact = false,
+    bool isWarning = false,
   }) {
-    return Card(
-      color: color.withValues(alpha: 0.1),
-      child: Padding(
-        padding: EdgeInsets.all(compact ? 12 : 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: compact ? 12 : 13,
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isWarning ? const Color(0xFFFCA5A5) : const Color(0xFFE2E8F0),
+          width: isWarning ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isWarning
+                ? const Color(0xFFEF4444).withValues(alpha: 0.1)
+                : const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 14,
+        vertical: compact ? 10 : 12,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: compact ? 28 : 34,
+                height: compact ? 28 : 34,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, color: color, size: compact ? 16 : 19),
               ),
-            ),
-            SizedBox(height: compact ? 3 : 4),
-            Text(
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: compact ? 11.5 : 13,
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+              ),
+              if (isWarning)
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFFEF4444),
+                  ),
+                ),
+            ],
+          ),
+          SizedBox(height: compact ? 6 : 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
               value,
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: compact ? 16 : 18),
+              style: TextStyle(
+                fontSize: compact ? 17 : 20,
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF0F172A),
+                letterSpacing: -0.5,
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1644,12 +1572,53 @@ hubConnection = signalr_core.HubConnectionBuilder()
     required double screenWidth,
     required double contentWidth,
   }) {
+    _syncSilosWithLiveState();
+
+    final totalWeightKg = _silos.fold<double>(0.0, (sum, s) => sum + s.weight);
+    final totalMassTons = totalWeightKg / 1000.0;
+    final activeSilosCount = _silos.where((s) => s.weight > 0).length;
+    final lowLevelCount = _silos.where((s) {
+      final pct = s.level * 100;
+      return pct >= 20.0 && pct <= 50.0;
+    }).length;
+    final warningCount = _silos.where((s) {
+      final pct = s.level * 100;
+      return pct < 20.0;
+    }).length;
+    const double consumedTodayTons = 0.0;
+
     final stats = <Map<String, dynamic>>[
-      {'title': 'Tổng khối lượng', 'value': '1,245.32 tấn', 'color': Colors.blue},
-      {'title': 'Silo hoạt động', 'value': '22/24', 'color': Colors.green},
-      {'title': 'Silo mức thấp', 'value': '3 silo', 'color': Colors.orange},
-      {'title': 'Cảnh báo', 'value': '5 cảnh báo', 'color': Colors.red},
-      {'title': 'Lượng ăn hôm nay', 'value': '18.52 tấn', 'color': Colors.purple},
+      {
+        'title': 'Tổng khối lượng',
+        'value': '${totalMassTons.toStringAsFixed(2)} tấn',
+        'color': const Color(0xFF2563EB),
+        'icon': Icons.scale_outlined,
+      },
+      {
+        'title': 'Silo hoạt động',
+        'value': '$activeSilosCount/8',
+        'color': const Color(0xFF10B981),
+        'icon': Icons.sensors_rounded,
+      },
+      {
+        'title': 'Silo mức thấp',
+        'value': '$lowLevelCount silo',
+        'color': const Color(0xFFF59E0B),
+        'icon': Icons.water_drop_outlined,
+      },
+      {
+        'title': 'Cảnh báo',
+        'value': '$warningCount cảnh báo',
+        'color': const Color(0xFFEF4444),
+        'icon': Icons.notifications_active_outlined,
+        'isWarning': true,
+      },
+      {
+        'title': 'Lượng ăn hôm nay',
+        'value': '${consumedTodayTons.toStringAsFixed(2)} tấn',
+        'color': const Color(0xFF8B5CF6),
+        'icon': Icons.analytics_outlined,
+      },
     ];
 
     // Mobile thật: ẩn hoàn toàn Stats.
@@ -1658,13 +1627,13 @@ hubConnection = signalr_core.HubConnectionBuilder()
     }
 
     final isTablet = screenWidth < 1100;
-    final horizontalPadding = isTablet ? 6.0 : 10.0;
-    final gap = 8.0;
+    final horizontalPadding = isTablet ? 4.0 : 6.0;
+    final gap = 10.0;
     final rawCardWidth = isTablet
-        ? 152.0
+        ? 158.0
         : ((contentWidth - (horizontalPadding * 2) - (gap * (stats.length - 1))) /
                 stats.length)
-            .clamp(158.0, 210.0);
+            .clamp(165.0, 220.0);
     final cardWidth = rawCardWidth.toDouble();
 
     final row = Row(
@@ -1678,7 +1647,9 @@ hubConnection = signalr_core.HubConnectionBuilder()
               item['title'] as String,
               item['value'] as String,
               item['color'] as Color,
+              item['icon'] as IconData,
               compact: isTablet,
+              isWarning: (item['isWarning'] as bool?) ?? false,
             ),
           ),
         );
@@ -1686,7 +1657,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
     );
 
     return SizedBox(
-      height: isTablet ? 94 : 100,
+      height: isTablet ? 108 : 116,
       child: ScrollConfiguration(
         behavior: const MaterialScrollBehavior().copyWith(
           dragDevices: {
@@ -1699,6 +1670,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
         ),
         child: Scrollbar(
           controller: _statsScrollController,
+
           thumbVisibility: true,
           child: SingleChildScrollView(
             controller: _statsScrollController,
@@ -1713,6 +1685,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       ),
     );
   }
+
 
   List<SiloMassPoint> _buildSiloMassPoints({int? siloId}) {
     if (_siloHistory.isEmpty) return const <SiloMassPoint>[];
@@ -1794,22 +1767,21 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   Widget _buildModulesAndChartSection(double maxWidth) {
     int crossAxisCount;
-    if (maxWidth >= 1500) {
+    if (maxWidth >= 720) {
       crossAxisCount = 4;
-    } else if (maxWidth >= 1050) {
-      crossAxisCount = 3;
-    } else if (maxWidth >= 680) {
+    } else if (maxWidth >= 500) {
       crossAxisCount = 2;
     } else {
       crossAxisCount = 1;
     }
 
     final moduleCardAspectRatio = switch (crossAxisCount) {
-      1 => 1.06,
-      2 => 1.0,
-      3 => 0.93,
-      _ => 0.88,
+      1 => 1.05,
+      2 => 0.95,
+      4 => 0.82,
+      _ => 0.85,
     };
+
 
     final chartPoints = _buildSiloMassPoints();
 
@@ -1853,10 +1825,9 @@ hubConnection = signalr_core.HubConnectionBuilder()
         ),
         const SizedBox(height: 20),
         SiloMassChart(
-          title: _silos.isNotEmpty
-              ? 'Biểu đồ khối lượng ${_silos.first.id}'
-              : 'Biểu đồ khối lượng Silo',
+          title: 'Biểu đồ tổng hợp khối lượng',
           chartData: chartPoints,
+
           rawCount: _siloHistory.length,
           selectedTimeRange: _selectedTimeframe,
           timeRangeOptions: _timeframeDurations.keys.toList(growable: false),
@@ -1867,92 +1838,63 @@ hubConnection = signalr_core.HubConnectionBuilder()
     );
   }
 
-  Future<Map<String, String>?> _showAddPumpPlanDialog() async {
-    final result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (dialogContext) {
-        final timeController = TextEditingController();
-        final siloController = TextEditingController();
-        final materialController = TextEditingController();
-        final qtyController = TextEditingController();
-        final statusController = TextEditingController(text: 'Chờ');
+  void _syncSilosWithLiveState() {
+    if (_silos.isEmpty) {
+      _silos = List<Silo>.generate(_totalSiloCount, (index) {
+        final siloId = index + 1;
+        final weight = _getDisplayWeightForSilo(siloId);
+        final maxWeight = _getSiloMaxWeight(siloId);
+        final level = maxWeight > 0 ? (weight / maxWeight).clamp(0.0, 1.0) : 0.0;
+        return Silo(id: 'Silo $siloId', weight: weight, level: level);
+      });
+      return;
+    }
 
-        return AlertDialog(
-          title: const Text('Thêm kế hoạch'),
-          content: SingleChildScrollView(
-            child: Column(
-              children: [
-                TextField(
-                  controller: timeController,
-                  decoration: const InputDecoration(labelText: 'Thời gian'),
-                ),
-                TextField(
-                  controller: siloController,
-                  decoration: const InputDecoration(labelText: 'Silo'),
-                ),
-                TextField(
-                  controller: materialController,
-                  decoration: const InputDecoration(labelText: 'Nguyên liệu'),
-                ),
-                TextField(
-                  controller: qtyController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Số lượng'),
-                ),
-                TextField(
-                  controller: statusController,
-                  decoration: const InputDecoration(labelText: 'Trạng thái'),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Hủy'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop({
-                  'time': timeController.text.trim(),
-                  'silo': siloController.text.trim(),
-                  'material': materialController.text.trim(),
-                  'qty': qtyController.text.trim(),
-                  'status': statusController.text.trim(),
-                });
-              },
-              child: const Text('Thêm'),
-            ),
-          ],
+    for (var i = 0; i < _silos.length; i++) {
+      final s = _silos[i];
+      final siloId = _extractSiloId(s.id, fallback: i + 1);
+      final liveWeight = _getDisplayWeightForSilo(siloId);
+      final maxWeight = _getSiloMaxWeight(siloId);
+      final liveLevel = maxWeight > 0 ? (liveWeight / maxWeight).clamp(0.0, 1.0) : 0.0;
+
+      if (s.weight != liveWeight || s.level != liveLevel) {
+        _silos[i] = Silo(
+          id: s.id,
+          weight: liveWeight,
+          level: liveLevel,
         );
-      },
-    );
-
-    return result;
+      }
+    }
   }
 
-  Widget _buildPumpPlanCard() {
-    final pumpSiloIds = _getPumpPlanSiloIds(_pumpPlanRows);
-    final selectedPumpPlanSiloId = _getEffectivePumpPlanSiloId(_pumpPlanRows);
-    final filteredRows = _getFilteredPumpPlanRows(_pumpPlanRows);
-    final visibleRows = filteredRows.take(10).toList(growable: false);
+  Widget _buildPumpPlanCard({bool isCompactOverview = false}) {
+    _syncSilosWithLiveState();
 
-    // Tách phần UI thành widget dùng chung, giữ toàn bộ state/logic tại Dashboard.
     return SiloPlanTable(
-      title: 'Danh sách kế hoạch',
-      siloIds: pumpSiloIds,
-      selectedSiloId: selectedPumpPlanSiloId,
-      filteredRows: filteredRows,
-      visibleRows: visibleRows,
+      silos: _silos,
       scrollController: _pumpPlanTableScrollController,
-      onSiloChanged: (value) async {
-        await _handlePumpPlanSiloChanged(value);
-      },
       onExportExcel: () async {
         final messenger = ScaffoldMessenger.of(context);
+        final statusRows = _silos.map((s) {
+          final percent = (s.level * 100).clamp(0.0, 100.0);
+          String status = 'Bình thường';
+          if (percent < 20) {
+            status = 'Cảnh báo';
+          } else if (percent <= 50) {
+            status = 'Mức thấp';
+          }
+          return {
+            'silo': s.id,
+            'qty': '${s.weight.toStringAsFixed(1)} kg',
+            'material': '${percent.toStringAsFixed(1)}%',
+            'status': status,
+            'time': DateFormat('HH:mm:ss dd/MM/yyyy').format(DateTime.now()),
+          };
+        }).toList();
+
         final result = await exportPlanRowsToExcel(
-          filePrefix: 'ke_hoach_bom',
-          rows: filteredRows,
+          filePrefix: 'trang_thai_silo',
+          rows: statusRows,
         );
 
         if (!mounted) return;
@@ -1960,55 +1902,11 @@ hubConnection = signalr_core.HubConnectionBuilder()
           SnackBar(content: Text(result.message)),
         );
       },
-      onAddPlanClick: () async {
-        final result = await _showAddPumpPlanDialog();
-
-        if (result == null || !mounted) return;
-
-        final messenger = ScaffoldMessenger.of(context);
-
-        final time = result['time'] ?? '';
-        final silo = result['silo'] ?? '';
-        final material = result['material'] ?? '';
-        final qty = result['qty'] ?? '';
-        final status = result['status'] ?? '';
-
-        if (time.isEmpty ||
-            silo.isEmpty ||
-            material.isEmpty ||
-            qty.isEmpty ||
-            status.isEmpty) {
-          _showErrorSnackBar('Vui lòng nhập đầy đủ thông tin');
-          return;
-        }
-
-        setState(() {
-          _pumpPlanRows.add({
-            'time': time,
-            'silo': silo,
-            'material': material,
-            'qty': qty,
-            'status': status,
-          });
-        });
-
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Đã thêm kế hoạch')),
-        );
-      },
-      onDeletePlan: (row) {
-        setState(() {
-          _pumpPlanRows.remove(row);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã xóa kế hoạch')),
-        );
-      },
-      statusColorBuilder: _statusColor,
+      isCompactOverview: isCompactOverview,
     );
   }
 
-  Widget _buildStatisticsReportCard() {
+  Widget _buildStatisticsReportCard({bool isCompactOverview = false}) {
     final statisticsSiloIds = _getStatisticsSiloIds();
     final selectedStatisticsSiloId = _getEffectiveStatisticsSiloId();
     final sourceHistory = _buildStatisticsHistorySource();
@@ -2027,6 +1925,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       onExportPressed: () async {
         await _exportStatisticsReport(isAuto: false);
       },
+      isCompactOverview: isCompactOverview,
     );
   }
 
@@ -2034,9 +1933,9 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildPumpPlanCard(),
+        _buildPumpPlanCard(isCompactOverview: true),
         const SizedBox(height: 12),
-        _buildStatisticsReportCard(),
+        _buildStatisticsReportCard(isCompactOverview: true),
       ],
     );
   }
@@ -2045,8 +1944,112 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildStatisticsReportCard(),
+        _buildStatisticsReportCard(isCompactOverview: false),
       ],
+    );
+  }
+
+  Widget _buildHistoryTabSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStatisticsReportCard(isCompactOverview: false),
+      ],
+    );
+  }
+
+
+  Widget _buildWarningTabSection() {
+    return Container(
+      margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFFCA5A5)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFEF4444).withValues(alpha: 0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Lịch sử cảnh báo hệ thống',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    Text(
+                      'Giám sát các sự cố vượt ngưỡng cân và gián đoạn kết nối',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                ),
+                child: const Text(
+                  '5 cảnh báo gần nhất',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF991B1B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const ListTile(
+            leading: Icon(Icons.error_outline, color: Color(0xFFEF4444)),
+            title: Text('Silo 2: Khối lượng đạt 95% sức chứa Max', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+            subtitle: Text('Thời gian: 14:32:10 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
+            trailing: Chip(label: Text('Mức cao', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFFEF4444)),
+          ),
+          const Divider(height: 1),
+          const ListTile(
+            leading: Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B)),
+            title: Text('Silo 3: Mức nguyên liệu thấp (< 20%)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+            subtitle: Text('Thời gian: 11:15:42 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
+            trailing: Chip(label: Text('Cần nạp', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFFF59E0B)),
+          ),
+          const Divider(height: 1),
+          const ListTile(
+            leading: Icon(Icons.sensors_off_rounded, color: Color(0xFF64748B)),
+            title: Text('Cảm biến Silo 4: Gián đoạn tín hiệu SignalR tạm thời', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+            subtitle: Text('Thời gian: 08:05:00 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
+            trailing: Chip(label: Text('Đã tự khôi phục', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFF10B981)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2058,6 +2061,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
       ],
     );
   }
+
 
   Widget _buildSiloMonitorTabSection() {
     final monitorSiloIds = _getSettingsSiloIds();
@@ -2158,314 +2162,399 @@ hubConnection = signalr_core.HubConnectionBuilder()
         ? selectedSiloId
         : null;
 
-    return Card(
-      elevation: 4,
+    return Container(
       margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Cài đặt Cân Max',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Cài đặt Cân Max & Ngưỡng nhiễu',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: Color(0xFF0F172A),
                   ),
                 ),
-                _buildInfoBadge('Silo hiện có: $displaySiloCount'),
+              ),
+              _buildInfoBadge('Silo hiện có: $displaySiloCount'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(
+            initialValue: selectedValue,
+            items: siloIds
+                .map(
+                  (id) => DropdownMenuItem<int>(
+                    value: id,
+                    child: Text('Silo $id'),
+                  ),
+                )
+                .toList(),
+            onChanged: siloIds.isEmpty
+                ? null
+                : (value) async {
+                    if (value == null) return;
+
+                    setState(() {
+                      _selectedSettingsSiloId = value;
+                    });
+
+                    final loadedMax = await loadSiloConfig(value);
+                    final loadedNoise = await loadSiloNoiseConfig(value);
+                    if (!mounted) return;
+
+                    setState(() {
+                      _settingsMaxWeightController.text = loadedMax.toStringAsFixed(1);
+                      _settingsMaxWeightError = _validateMaxWeight(
+                        _settingsMaxWeightController.text,
+                      );
+                      _settingsNoiseThresholdKg = loadedNoise;
+                    });
+                  },
+            decoration: InputDecoration(
+              labelText: 'Chọn Silo',
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _settingsMaxWeightController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Cân Max (kg)',
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              errorText: _settingsMaxWeightError,
+            ),
+            onChanged: (value) async {
+              final validationError = _validateMaxWeight(value);
+              if (mounted) {
+                setState(() {
+                  _settingsMaxWeightError = validationError;
+                });
+              }
+
+              final siloId = _selectedSettingsSiloId;
+              final maxWeight = double.tryParse(value.trim().replaceAll(',', '.'));
+              if (validationError != null || siloId == null || maxWeight == null) return;
+
+              await saveSiloConfig(siloId, maxWeight);
+            },
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F9FF),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFBAE6FD)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0369A1),
+                  ),
+                ),
+                Slider(
+                  value: _settingsNoiseThresholdKg,
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  activeColor: const Color(0xFF0284C7),
+                  label: '${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                  onChanged: (value) {
+                    setState(() {
+                      _settingsNoiseThresholdKg = value;
+                      if (_selectedSettingsSiloId == _getActiveSiloId()) {
+                        _noiseThresholdKg = value;
+                      }
+                    });
+                  },
+                  onChangeEnd: (value) async {
+                    final siloId = _selectedSettingsSiloId;
+                    if (siloId == null) return;
+                    await saveSiloNoiseConfig(siloId, value);
+                  },
+                ),
               ],
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              initialValue: selectedValue,
-              items: siloIds
-                  .map(
-                    (id) => DropdownMenuItem<int>(
-                      value: id,
-                      child: Text('Silo $id'),
-                    ),
-                  )
-                  .toList(),
-              onChanged: siloIds.isEmpty
-                  ? null
-                  : (value) async {
-                      if (value == null) return;
+          ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final siloId = _selectedSettingsSiloId;
+                final maxWeight = double.tryParse(
+                  _settingsMaxWeightController.text.trim().replaceAll(',', '.'),
+                );
+                final validationError = _validateMaxWeight(
+                  _settingsMaxWeightController.text,
+                );
 
-                      setState(() {
-                        _selectedSettingsSiloId = value;
-                      });
-
-                      final loadedMax = await loadSiloConfig(value);
-                      final loadedNoise = await loadSiloNoiseConfig(value);
-                      if (!mounted) return;
-
-                      setState(() {
-                        _settingsMaxWeightController.text = loadedMax.toStringAsFixed(1);
-                        _settingsMaxWeightError = _validateMaxWeight(
-                          _settingsMaxWeightController.text,
-                        );
-                        _settingsNoiseThresholdKg = loadedNoise;
-                      });
-                    },
-              decoration: const InputDecoration(
-                labelText: 'Silo',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _settingsMaxWeightController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: 'Cân Max (kg)',
-                border: OutlineInputBorder(),
-                errorText: _settingsMaxWeightError,
-              ),
-              onChanged: (value) async {
-                final validationError = _validateMaxWeight(value);
                 if (mounted) {
                   setState(() {
                     _settingsMaxWeightError = validationError;
                   });
                 }
 
-                final siloId = _selectedSettingsSiloId;
-                final maxWeight = double.tryParse(value.trim().replaceAll(',', '.'));
-                if (validationError != null || siloId == null || maxWeight == null) return;
+                if (siloId == null || maxWeight == null || validationError != null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Vui lòng nhập đúng Silo và Cân Max')),
+                  );
+                  return;
+                }
 
                 await saveSiloConfig(siloId, maxWeight);
+                await saveSiloNoiseConfig(siloId, _settingsNoiseThresholdKg);
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(0xFF10B981),
+                    content: Text(
+                      'Đã lưu Silo $siloId | Cân Max: ${maxWeight.toStringAsFixed(1)} kg | Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
+                    ),
+                  ),
+                );
               },
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.blue.shade100),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue.shade900,
-                    ),
-                  ),
-                  Slider(
-                    value: _settingsNoiseThresholdKg,
-                    min: 0,
-                    max: 100,
-                    divisions: 100,
-                    label: '${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
-                    onChanged: (value) {
-                      setState(() {
-                        _settingsNoiseThresholdKg = value;
-                        if (_selectedSettingsSiloId == _getActiveSiloId()) {
-                          _noiseThresholdKg = value;
-                        }
-                      });
-                    },
-                    onChangeEnd: (value) async {
-                      final siloId = _selectedSettingsSiloId;
-                      if (siloId == null) return;
-                      await saveSiloNoiseConfig(siloId, value);
-                    },
-                  ),
-                ],
+              icon: const Icon(Icons.save_rounded, size: 18),
+              label: const Text('Lưu cấu hình'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  final messenger = ScaffoldMessenger.of(context);
-                  final siloId = _selectedSettingsSiloId;
-                  final maxWeight = double.tryParse(
-                    _settingsMaxWeightController.text.trim().replaceAll(',', '.'),
-                  );
-                  final validationError = _validateMaxWeight(
-                    _settingsMaxWeightController.text,
-                  );
-
-                  if (mounted) {
-                    setState(() {
-                      _settingsMaxWeightError = validationError;
-                    });
-                  }
-
-                  if (siloId == null || maxWeight == null || validationError != null) {
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Vui lòng nhập đúng Silo và Cân Max')),
-                    );
-                    return;
-                  }
-
-                  await saveSiloConfig(siloId, maxWeight);
-                  await saveSiloNoiseConfig(siloId, _settingsNoiseThresholdKg);
-                  if (!mounted) return;
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'Đã lưu Silo $siloId | Cân Max: ${maxWeight.toStringAsFixed(1)} kg | Ngưỡng nhiễu: ${_settingsNoiseThresholdKg.toStringAsFixed(0)} kg',
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.save),
-                label: const Text('Lưu cấu hình'),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Cấu hình được lưu bằng SharedPreferences và tự động áp dụng khi re-build/responsive.',
-              style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Cấu hình được lưu tự động và áp dụng trên toàn bộ các widget theo thời gian thực.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildUserManagementCard() {
     if (_isAdmin) {
-      return Card(
-        elevation: 4,
+      return Container(
         margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  const Text(
-                    'Quản lý người dùng',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                  ),
-                  _buildInfoBadge('Tài khoản: ${_userAccounts.length}'),
-                  OutlinedButton.icon(
-                    onPressed: _loadUserAccounts,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Tải lại'),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _showCreateUserDialog,
-                    icon: const Icon(Icons.person_add),
-                    label: const Text('Tạo tài khoản mới'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_isLoadingUserAccounts)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 18),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_userAccountsError != null)
-                Text(
-                  _userAccountsError!,
-                  style: const TextStyle(color: Colors.red),
-                )
-              else
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.resolveWith(
-                      (states) => Colors.blue.shade50,
-                    ),
-                    columns: const [
-                      DataColumn(label: Text('Tên đăng nhập')),
-                      DataColumn(label: Text('Vai trò')),
-                      DataColumn(label: Text('Thao tác')),
-                    ],
-                    rows: _userAccounts.map((user) {
-                      final username = (user['username'] ?? '').toString();
-                      final role = (user['role'] ?? 'sub').toString();
-
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(username)),
-                          DataCell(Text(role)),
-                          DataCell(
-                            OutlinedButton.icon(
-                              onPressed: () => _showEditUserDialog(user),
-                              icon: const Icon(Icons.edit, size: 16),
-                              label: const Text('Sửa đổi thông tin'),
-                            ),
-                          ),
-                        ],
-                      );
-                    }).toList(growable: false),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text(
+                  'Quản lý người dùng',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: Color(0xFF0F172A),
                   ),
                 ),
-            ],
-          ),
+                _buildInfoBadge('Tài khoản: ${_userAccounts.length}'),
+                OutlinedButton.icon(
+                  onPressed: _loadUserAccounts,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Tải lại'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _showCreateUserDialog,
+                  icon: const Icon(Icons.person_add_rounded, size: 18),
+                  label: const Text('Tạo tài khoản mới'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_isLoadingUserAccounts)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_userAccountsError != null)
+              Text(
+                _userAccountsError!,
+                style: const TextStyle(color: Color(0xFFEF4444)),
+              )
+            else
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.resolveWith(
+                    (states) => const Color(0xFFF8FAFC),
+                  ),
+                  columns: const [
+                    DataColumn(label: Text('Tên đăng nhập', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569)))),
+                    DataColumn(label: Text('Vai trò', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569)))),
+                    DataColumn(label: Text('Thao tác', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569)))),
+                  ],
+                  rows: _userAccounts.map((user) {
+                    final username = (user['username'] ?? '').toString();
+                    final role = (user['role'] ?? 'sub').toString();
+
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(username, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0F172A)))),
+                        DataCell(Text(role, style: const TextStyle(color: Color(0xFF475569)))),
+                        DataCell(
+                          OutlinedButton.icon(
+                            onPressed: () => _showEditUserDialog(user),
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            label: const Text('Sửa đổi thông tin'),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(growable: false),
+                ),
+              ),
+          ],
         ),
       );
     }
 
-    return Card(
-      elevation: 4,
+    return Container(
       margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Thông tin cá nhân',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Thông tin cá nhân',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+              color: Color(0xFF0F172A),
             ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.person),
-              title: Text(_currentUserName),
-              subtitle: const Text('Tài khoản con'),
+          ),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFEEF2FF),
+              child: Icon(Icons.person, color: Color(0xFF2563EB)),
             ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: ElevatedButton.icon(
-                onPressed: _showChangeMyPasswordDialog,
-                icon: const Icon(Icons.lock_reset),
-                label: const Text('Đổi mật khẩu'),
+            title: Text(_currentUserName, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+            subtitle: const Text('Tài khoản con', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ElevatedButton.icon(
+              onPressed: _showChangeMyPasswordDialog,
+              icon: const Icon(Icons.lock_reset_rounded, size: 18),
+              label: const Text('Đổi mật khẩu'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
+
   Widget _buildCompactDashboard(double maxWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
     final showStats = screenWidth >= 600;
+    final isOverview = _selectedIndex <= 0;
     final showSiloMonitorTab = _selectedIndex == _siloMonitorTabIndex;
     final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
+    final showHistoryTab = _selectedIndex == _historyTabIndex;
+    final showWarningTab = _selectedIndex == _warningTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final horizontalPadding = maxWidth < 640 ? 10.0 : 16.0;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
+      backgroundColor: const Color(0xFFF4F7FC),
       appBar: AppBar(
-        title: const Text('Silo Dashboard'),
-        backgroundColor: Colors.blue.shade700,
+        title: const Text(
+          'TỔNG QUAN HỆ THỐNG',
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+        ),
+        backgroundColor: const Color(0xFF0B1B3D),
         foregroundColor: Colors.white,
+        elevation: 2,
       ),
       drawer: Drawer(
+        backgroundColor: const Color(0xFF0B1B3D),
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
@@ -2480,22 +2569,12 @@ hubConnection = signalr_core.HubConnectionBuilder()
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showStats &&
-                    !showSettings &&
-                    !showUserManagement &&
-                    !showReportTab &&
-                    !showPumpPlanTab &&
-                    !showSiloMonitorTab)
+                if (showStats && isOverview)
                   _buildStatsSection(
                     screenWidth: screenWidth,
                     contentWidth: maxWidth,
                   ),
-                if (showStats &&
-                    !showSettings &&
-                    !showUserManagement &&
-                    !showReportTab &&
-                    !showPumpPlanTab &&
-                    !showSiloMonitorTab)
+                if (showStats && isOverview)
                   const SizedBox(height: 16),
                 if (showSettings)
                   _buildSettingsConfigurationCard()
@@ -2505,6 +2584,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
                   _buildSiloMonitorTabSection()
                 else if (showPumpPlanTab)
                   _buildPumpPlanTabSection()
+                else if (showHistoryTab)
+                  _buildHistoryTabSection()
+                else if (showWarningTab)
+                  _buildWarningTabSection()
                 else if (showReportTab)
                   _buildReportTabSection()
                 else ...[
@@ -2522,66 +2605,123 @@ hubConnection = signalr_core.HubConnectionBuilder()
 
   Widget _buildDesktopDashboard(double sidebarWidth) {
     final screenWidth = MediaQuery.of(context).size.width;
+    final isOverview = _selectedIndex <= 0;
     final showSiloMonitorTab = _selectedIndex == _siloMonitorTabIndex;
     final showPumpPlanTab = _selectedIndex == _pumpPlanTabIndex;
+    final showHistoryTab = _selectedIndex == _historyTabIndex;
+    final showWarningTab = _selectedIndex == _warningTabIndex;
     final showReportTab = _selectedIndex == _reportTabIndex;
     final showSettings = _selectedIndex == _settingsTabIndex;
     final showUserManagement = _selectedIndex == _userManagementTabIndex;
     final rightPanelWidth = (screenWidth * 0.30).clamp(420.0, 560.0);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FB),
+      backgroundColor: const Color(0xFFF4F7FC),
       body: SafeArea(
         top: false,
         child: Column(
           children: [
             Container(
               height: 76,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 24),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.9),
-                border: Border.all(color: Colors.blue.shade100),
+                color: Colors.white,
+                border: const Border(
+                  bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.04),
                     blurRadius: 14,
-                    offset: const Offset(0, 8),
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.blue.shade700,
-                    ),
-                    child: const Icon(Icons.cloud, color: Colors.white, size: 22),
-                  ),
-                  const SizedBox(width: 12),
                   const Expanded(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Silo Dashboard',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          'TỔNG QUAN HỆ THỐNG',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A),
+                            letterSpacing: -0.5,
+                          ),
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Giám sát & Điều khiển hệ thống cân định lượng',
-                          style: TextStyle(fontSize: 12, color: Colors.black54),
+                          'Giám sát & Điều khiển hệ thống cân định lượng silo',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   Row(
                     children: [
-                      const Icon(Icons.notifications, color: Colors.black54, size: 32),
-                      const SizedBox(width: 22),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color(0xFF10B981),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'Trực tuyến',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF047857),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Stack(
+                        children: [
+                          IconButton(
+                            onPressed: () {},
+                            icon: const Icon(
+                              Icons.notifications_none_rounded,
+                              color: Color(0xFF475569),
+                              size: 26,
+                            ),
+                          ),
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: Container(
+                              width: 9,
+                              height: 9,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color(0xFFEF4444),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 16),
                       PopupMenuButton<String>(
                         tooltip: 'Tài khoản',
                         onSelected: (value) async {
@@ -2603,62 +2743,80 @@ hubConnection = signalr_core.HubConnectionBuilder()
                             value: 'logout',
                             child: Row(
                               children: [
-                                Icon(Icons.logout, size: 18),
+                                Icon(Icons.logout, size: 18, color: Color(0xFFEF4444)),
                                 SizedBox(width: 8),
-                                Text('Đăng xuất'),
+                                Text('Đăng xuất', style: TextStyle(color: Color(0xFFEF4444))),
                               ],
                             ),
                           ),
                         ],
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.blue.shade700,
-                              ),
-                              child: ClipOval(
-                                child: _currentUserAvatarUrl.isNotEmpty
-                                    ? Image.network(
-                                        _currentUserAvatarUrl,
-                                        width: 42,
-                                        height: 42,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) {
-                                          return const Icon(
-                                            Icons.person,
-                                            color: Colors.white,
-                                            size: 22,
-                                          );
-                                        },
-                                      )
-                                    : const Icon(Icons.person, color: Colors.white, size: 22),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  _currentUserName,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(
+                                    colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
                                   ),
                                 ),
-                                Text(
-                                  _currentUserRole,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black54,
-                                  ),
+                                child: ClipOval(
+                                  child: _currentUserAvatarUrl.isNotEmpty
+                                      ? Image.network(
+                                          _currentUserAvatarUrl,
+                                          width: 36,
+                                          height: 36,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return const Icon(
+                                              Icons.person,
+                                              color: Colors.white,
+                                              size: 20,
+                                            );
+                                          },
+                                        )
+                                      : const Icon(Icons.person, color: Colors.white, size: 20),
                                 ),
-                              ],
-                            ),
-                          ],
+                              ),
+                              const SizedBox(width: 10),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    _currentUserName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  Text(
+                                    _currentUserRole,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF64748B),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(
+                                Icons.keyboard_arrow_down,
+                                size: 18,
+                                color: Color(0xFF64748B),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -2668,7 +2826,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
             ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.all(16),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -2678,11 +2836,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (!showSettings &&
-                              !showUserManagement &&
-                              !showReportTab &&
-                              !showPumpPlanTab &&
-                              !showSiloMonitorTab)
+                          if (isOverview)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: LayoutBuilder(
@@ -2710,6 +2864,14 @@ hubConnection = signalr_core.HubConnectionBuilder()
                                 : showPumpPlanTab
                                   ? SingleChildScrollView(
                                     child: _buildPumpPlanTabSection(),
+                                    )
+                                : showHistoryTab
+                                  ? SingleChildScrollView(
+                                    child: _buildHistoryTabSection(),
+                                    )
+                                : showWarningTab
+                                  ? SingleChildScrollView(
+                                    child: _buildWarningTabSection(),
                                     )
                                 : showReportTab
                                     ? SingleChildScrollView(
@@ -2751,6 +2913,8 @@ hubConnection = signalr_core.HubConnectionBuilder()
       ),
     );
   }
+
+
 
   @override
   Widget build(BuildContext context) {

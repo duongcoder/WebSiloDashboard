@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/app_config.dart';
+import '../utils/app_config.dart';
 
 class ScaleService {
   // static const String baseUrl = "http://localhost:5294/api/Scales";

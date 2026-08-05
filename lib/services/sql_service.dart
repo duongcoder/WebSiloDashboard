@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../config/app_config.dart';
+import '../utils/app_config.dart';
 import '../models/silo.dart';
 import '../models/indicator.dart';
 import '../models/controller.dart';
