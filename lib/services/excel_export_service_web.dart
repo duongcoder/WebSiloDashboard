@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 
+import '../services/statistics_report_helper.dart';
 import 'excel_export_service.dart';
 
 String _twoDigits(int value) {
@@ -43,6 +44,375 @@ Future<ExcelExportResult> _downloadByAnchor({
     message:
         'Đã tạo file Excel để tải về: $fileName. Nếu trình duyệt bật hỏi nơi lưu, bạn có thể tự chọn thư mục.',
   );
+}
+
+List<int>? _buildSiloStatusExcel({
+  required List<SiloStatusExportItem> items,
+}) {
+  final excel = Excel.createExcel();
+  final sheet = excel['Sheet1'];
+
+  final borderGrid = Border(
+    borderStyle: BorderStyle.Thin,
+    borderColorHex: ExcelColor.fromHexString('#D1D5DB'),
+  );
+
+  final titleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#1E3A8A'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 16,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final subTitleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#F1F5F9'),
+    fontColorHex: ExcelColor.fromHexString('#334155'),
+    fontSize: 11,
+    italic: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final headerStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#2563EB'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 12,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final now = DateTime.now();
+  final day = _twoDigits(now.day);
+  final month = _twoDigits(now.month);
+  final year = now.year.toString();
+  final hour = _twoDigits(now.hour);
+  final minute = _twoDigits(now.minute);
+  final timeStr = '$day/$month/$year $hour:$minute';
+
+  // Row 0: Title Block (Merged A1:F1)
+  final titleStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0);
+  final titleEnd = CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: 0);
+  sheet.merge(titleStart, titleEnd, customValue: TextCellValue('BÁO CÁO TRẠNG THÁI HOẠT ĐỘNG SILO - FEEDFARM'));
+  sheet.setMergedCellStyle(titleStart, titleStyle);
+
+  // Row 1: Sub-header Block (Merged A2:F2)
+  final subStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1);
+  final subEnd = CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: 1);
+  sheet.merge(subStart, subEnd, customValue: TextCellValue('Thời gian xuất: $timeStr'));
+  sheet.setMergedCellStyle(subStart, subTitleStyle);
+
+  // Row 2: Headers
+  final headers = [
+    'STT',
+    'Tên Silo',
+    'Khối lượng',
+    'Mức đầy (%)',
+    'Trạng thái',
+    'Cập nhật',
+  ];
+
+  for (var col = 0; col < headers.length; col++) {
+    final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2));
+    cell.value = TextCellValue(headers[col]);
+    cell.cellStyle = headerStyle;
+  }
+
+  // Minimum column widths
+  final colWidths = <double>[10.0, 16.0, 18.0, 18.0, 22.0, 26.0];
+
+  // Data rows starting at Row 3
+  for (var i = 0; i < items.length; i++) {
+    final item = items[i];
+    final rowIndex = 3 + i;
+
+    ExcelColor statusColor = ExcelColor.fromHexString('#64748B');
+    switch (item.status) {
+      case 'Bình thường':
+        statusColor = ExcelColor.fromHexString('#16A34A');
+        break;
+      case 'Mức thấp':
+        statusColor = ExcelColor.fromHexString('#D97706');
+        break;
+      case 'Cảnh báo':
+        statusColor = ExcelColor.fromHexString('#DC2626');
+        break;
+      default:
+        statusColor = ExcelColor.fromHexString('#64748B');
+        break;
+    }
+
+    final cellData = [
+      (text: '${item.stt}', align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: item.siloName, align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#0F172A'), bold: true),
+      (text: item.weightText, align: HorizontalAlign.Right, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: item.levelText, align: HorizontalAlign.Right, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: item.status, align: HorizontalAlign.Center, color: statusColor, bold: true),
+      (text: item.updatedAt, align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#334155'), bold: false),
+    ];
+
+    for (var col = 0; col < cellData.length; col++) {
+      final cData = cellData[col];
+      final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex));
+      cell.value = TextCellValue(cData.text);
+      cell.cellStyle = CellStyle(
+        fontColorHex: cData.color,
+        fontSize: 11,
+        bold: cData.bold,
+        horizontalAlign: cData.align,
+        verticalAlign: VerticalAlign.Center,
+        leftBorder: borderGrid,
+        rightBorder: borderGrid,
+        topBorder: borderGrid,
+        bottomBorder: borderGrid,
+      );
+
+      final calculatedWidth = (cData.text.length + 4).toDouble();
+      if (calculatedWidth > colWidths[col]) {
+        colWidths[col] = calculatedWidth;
+      }
+    }
+  }
+
+  for (var col = 0; col < colWidths.length; col++) {
+    sheet.setColumnWidth(col, colWidths[col]);
+  }
+
+  return excel.encode();
+}
+
+Future<ExcelExportResult> exportSiloStatusToExcel({
+  required List<SiloStatusExportItem> items,
+  String? downloadFileName,
+}) async {
+  try {
+    final now = DateTime.now();
+    final day = _twoDigits(now.day);
+    final month = _twoDigits(now.month);
+    final year = _twoDigits(now.year % 100);
+    final dateLabel = '$day-$month-$year';
+    final timeLabel =
+        '${_twoDigits(now.hour)}-${_twoDigits(now.minute)}-${_twoDigits(now.second)}';
+    final fileName =
+        (downloadFileName != null && downloadFileName.trim().isNotEmpty)
+            ? downloadFileName.trim()
+            : 'TrangThaiSilo_${timeLabel}_$dateLabel.xlsx';
+
+    final encoded = _buildSiloStatusExcel(items: items);
+    if (encoded == null) {
+      return const ExcelExportResult(
+        success: false,
+        message: 'Không thể tạo dữ liệu Excel.',
+      );
+    }
+
+    final bytes = Uint8List.fromList(encoded);
+    return _downloadByAnchor(bytes: bytes, fileName: fileName);
+  } catch (e) {
+    return ExcelExportResult(
+      success: false,
+      message: 'Xuất Excel thất bại: $e',
+    );
+  }
+}
+
+List<int>? _buildStatisticsReportExcel({
+  required List<CompressedStatisticsReportItem> rows,
+  int? selectedSiloId,
+}) {
+  final excel = Excel.createExcel();
+  final sheet = excel['Sheet1'];
+
+  final borderGrid = Border(
+    borderStyle: BorderStyle.Thin,
+    borderColorHex: ExcelColor.fromHexString('#D1D5DB'),
+  );
+
+  final titleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#1E3A8A'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 16,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final subTitleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#F1F5F9'),
+    fontColorHex: ExcelColor.fromHexString('#334155'),
+    fontSize: 11,
+    italic: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final headerStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#2563EB'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 12,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final now = DateTime.now();
+  final day = _twoDigits(now.day);
+  final month = _twoDigits(now.month);
+  final year = now.year.toString();
+  final hour = _twoDigits(now.hour);
+  final minute = _twoDigits(now.minute);
+  final timeStr = '$day/$month/$year $hour:$minute';
+
+  final titleText = selectedSiloId == null
+      ? 'BÁO CÁO THỐNG KÊ TỔNG - FEEDFARM SILO SYSTEM'
+      : 'BÁO CÁO THỐNG KÊ SILO $selectedSiloId - FEEDFARM SILO SYSTEM';
+
+  // Row 0: Title Block (Merged A1:G1)
+  final titleStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0);
+  final titleEnd = CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: 0);
+  sheet.merge(titleStart, titleEnd, customValue: TextCellValue(titleText));
+  sheet.setMergedCellStyle(titleStart, titleStyle);
+
+  // Row 1: Sub-header Block (Merged A2:G2)
+  final subStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1);
+  final subEnd = CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: 1);
+  sheet.merge(subStart, subEnd, customValue: TextCellValue('Thời gian xuất báo cáo: $timeStr'));
+  sheet.setMergedCellStyle(subStart, subTitleStyle);
+
+  // Row 2: Headers
+  final headers = [
+    'STT',
+    'ID Cân / Silo',
+    'Số cân (+/- kg)',
+    'Khối lượng trước',
+    'Khối lượng sau',
+    'Thời gian',
+    'Chi tiết',
+  ];
+
+  for (var col = 0; col < headers.length; col++) {
+    final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2));
+    cell.value = TextCellValue(headers[col]);
+    cell.cellStyle = headerStyle;
+  }
+
+  // Column width defaults (minimums)
+  final colWidths = <double>[10.0, 16.0, 20.0, 22.0, 22.0, 32.0, 45.0];
+
+  // Data rows starting at Row 3
+  for (var i = 0; i < rows.length; i++) {
+    final item = rows[i];
+    final rowIndex = 3 + i;
+
+    final changeText = item.weightChangeText;
+    ExcelColor changeColor = ExcelColor.fromHexString('#0F172A');
+    if (changeText.startsWith('+')) {
+      changeColor = ExcelColor.fromHexString('#16A34A');
+    } else if (changeText.startsWith('-')) {
+      changeColor = ExcelColor.fromHexString('#DC2626');
+    }
+
+    final cellData = [
+      (text: '${i + 1}', align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: 'Silo ${item.milestone.idScale}', align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: changeText, align: HorizontalAlign.Right, color: changeColor, bold: true),
+      (text: '${item.weightBefore.toStringAsFixed(0)} kg', align: HorizontalAlign.Right, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: '${item.weightAfter.toStringAsFixed(0)} kg', align: HorizontalAlign.Right, color: ExcelColor.fromHexString('#0F172A'), bold: false),
+      (text: item.timeRangeText, align: HorizontalAlign.Center, color: ExcelColor.fromHexString('#334155'), bold: false),
+      (text: item.detailText, align: HorizontalAlign.Left, color: ExcelColor.fromHexString('#334155'), bold: false),
+    ];
+
+    for (var col = 0; col < cellData.length; col++) {
+      final cData = cellData[col];
+      final cell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex));
+      cell.value = TextCellValue(cData.text);
+      cell.cellStyle = CellStyle(
+        fontColorHex: cData.color,
+        fontSize: 11,
+        bold: cData.bold,
+        horizontalAlign: cData.align,
+        verticalAlign: VerticalAlign.Center,
+        leftBorder: borderGrid,
+        rightBorder: borderGrid,
+        topBorder: borderGrid,
+        bottomBorder: borderGrid,
+      );
+
+      final calculatedWidth = (cData.text.length + 4).toDouble();
+      if (calculatedWidth > colWidths[col]) {
+        colWidths[col] = calculatedWidth;
+      }
+    }
+  }
+
+  for (var col = 0; col < colWidths.length; col++) {
+    sheet.setColumnWidth(col, colWidths[col]);
+  }
+
+  return excel.encode();
+}
+
+Future<ExcelExportResult> exportStatisticsReportToExcel({
+  required String filePrefix,
+  required List<CompressedStatisticsReportItem> rows,
+  int? selectedSiloId,
+  String? downloadFileName,
+}) async {
+  try {
+    final now = DateTime.now();
+    final day = _twoDigits(now.day);
+    final month = _twoDigits(now.month);
+    final year = _twoDigits(now.year % 100);
+    final dateLabel = '$day-$month-$year';
+    final timeLabel =
+        '${_twoDigits(now.hour)}-${_twoDigits(now.minute)}-${_twoDigits(now.second)}';
+    final fileName =
+        (downloadFileName != null && downloadFileName.trim().isNotEmpty)
+            ? downloadFileName.trim()
+            : 'ThongKe_${timeLabel}_$dateLabel.xlsx';
+
+    final encoded = _buildStatisticsReportExcel(rows: rows, selectedSiloId: selectedSiloId);
+    if (encoded == null) {
+      return const ExcelExportResult(
+        success: false,
+        message: 'Không thể tạo dữ liệu Excel.',
+      );
+    }
+
+    final bytes = Uint8List.fromList(encoded);
+    return _downloadByAnchor(bytes: bytes, fileName: fileName);
+  } catch (e) {
+    return ExcelExportResult(
+      success: false,
+      message: 'Xuất Excel thất bại: $e',
+    );
+  }
 }
 
 Future<ExcelExportResult> exportPlanRowsToExcel({

@@ -9,7 +9,7 @@ class SiloReportTable extends StatefulWidget {
   final List<CompressedStatisticsReportItem> rows;
   final ScrollController scrollController;
   final ValueChanged<int?>? onSiloChanged;
-  final Future<void> Function() onExportPressed;
+  final Future<void> Function(List<CompressedStatisticsReportItem> filteredRows)? onExportPressed;
   final bool isCompactOverview;
 
   const SiloReportTable({
@@ -182,7 +182,9 @@ class _SiloReportTableState extends State<SiloReportTable> {
             ),
             ElevatedButton.icon(
               onPressed: () async {
-                await widget.onExportPressed();
+                if (widget.onExportPressed != null) {
+                  await widget.onExportPressed!(filteredFullRows);
+                }
               },
               icon: const Icon(Icons.table_view, size: 18),
               label: const Text('Xuất excel'),

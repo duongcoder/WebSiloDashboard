@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signalr_core/signalr_core.dart' as signalr_core;
@@ -1177,25 +1176,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return _siloHistory.where((row) => row.idScale == selectedSiloId).toList();
   }
 
-  List<Map<String, String>> _buildReportExportRows() {
-    final compressed = generateCompressedStatisticsReport(_buildStatisticsHistorySource());
-    final visibleRows = compressed.reversed.take(10).toList();
-
-    final exportRows = <Map<String, String>>[];
-
-    for (final item in visibleRows) {
-      exportRows.add({
-        'time': item.timeRangeText,
-        'silo': item.milestone.idScale.toString(),
-        'material': item.detailText,
-        'qty': item.weightChangeText,
-        'status': 'Thong ke',
-      });
-    }
-
-    return exportRows;
-  }
-
   String _buildReportFileName() {
     final now = DateTime.now();
     final day = now.day.toString().padLeft(2, '0');
@@ -1204,11 +1184,18 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return 'ThongKe_${day}_${month}_$year.xlsx';
   }
 
-  Future<void> _exportStatisticsReport({required bool isAuto}) async {
-    final rows = _buildReportExportRows();
+  Future<void> _exportStatisticsReport({
+    List<CompressedStatisticsReportItem>? customRows,
+    required bool isAuto,
+  }) async {
+    final rows = customRows ??
+        generateCompressedStatisticsReport(_buildStatisticsHistorySource())
+            .reversed
+            .toList();
 
     if (rows.isEmpty) return;
 
+    final selectedSiloId = _getEffectiveStatisticsSiloId();
     final now = DateTime.now();
     final day = now.day.toString().padLeft(2, '0');
     final month = now.month.toString().padLeft(2, '0');
@@ -1216,9 +1203,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
     final filePrefix = 'ThongKe_$day-$month-$year';
     final downloadFileName = _buildReportFileName();
 
-    final result = await exportPlanRowsToExcel(
+    final result = await exportStatisticsReportToExcel(
       filePrefix: filePrefix,
       rows: rows,
+      selectedSiloId: selectedSiloId,
       downloadFileName: downloadFileName,
     );
 
@@ -1873,28 +1861,10 @@ hubConnection = signalr_core.HubConnectionBuilder()
     return SiloPlanTable(
       silos: _silos,
       scrollController: _pumpPlanTableScrollController,
-      onExportExcel: () async {
+      onExportExcel: (exportItems) async {
         final messenger = ScaffoldMessenger.of(context);
-        final statusRows = _silos.map((s) {
-          final percent = (s.level * 100).clamp(0.0, 100.0);
-          String status = 'Bình thường';
-          if (percent < 20) {
-            status = 'Cảnh báo';
-          } else if (percent <= 50) {
-            status = 'Mức thấp';
-          }
-          return {
-            'silo': s.id,
-            'qty': '${s.weight.toStringAsFixed(1)} kg',
-            'material': '${percent.toStringAsFixed(1)}%',
-            'status': status,
-            'time': DateFormat('HH:mm:ss dd/MM/yyyy').format(DateTime.now()),
-          };
-        }).toList();
-
-        final result = await exportPlanRowsToExcel(
-          filePrefix: 'trang_thai_silo',
-          rows: statusRows,
+        final result = await exportSiloStatusToExcel(
+          items: exportItems,
         );
 
         if (!mounted) return;
@@ -1912,7 +1882,6 @@ hubConnection = signalr_core.HubConnectionBuilder()
     final sourceHistory = _buildStatisticsHistorySource();
     final rows = generateCompressedStatisticsReport(sourceHistory)
         .reversed
-        .take(20)
         .toList();
     return SiloReportTable(
       siloIds: statisticsSiloIds,
@@ -1922,8 +1891,11 @@ hubConnection = signalr_core.HubConnectionBuilder()
       onSiloChanged: (value) async {
         await _handleStatisticsSiloChanged(value);
       },
-      onExportPressed: () async {
-        await _exportStatisticsReport(isAuto: false);
+      onExportPressed: (filteredRows) async {
+        await _exportStatisticsReport(
+          customRows: filteredRows,
+          isAuto: false,
+        );
       },
       isCompactOverview: isCompactOverview,
     );

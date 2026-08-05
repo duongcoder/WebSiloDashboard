@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/silo.dart';
+import '../services/excel_export_service.dart';
 
 class SiloPlanTable extends StatefulWidget {
   final List<Silo> silos;
   final ScrollController scrollController;
-  final Future<void> Function() onExportExcel;
+  final Future<void> Function(List<SiloStatusExportItem> exportItems)? onExportExcel;
   final bool isCompactOverview;
 
   const SiloPlanTable({
@@ -249,7 +250,22 @@ class _SiloPlanTableState extends State<SiloPlanTable> {
             ),
             ElevatedButton.icon(
               onPressed: () async {
-                await widget.onExportExcel();
+                if (widget.onExportExcel != null) {
+                  final exportItems = visibleRows.map((row) {
+                    final weightStr = row.hasData ? '${row.weight.toStringAsFixed(1)} kg' : '-';
+                    final levelStr = row.hasData ? '${(row.level * 100).toStringAsFixed(1)}%' : '-';
+                    return SiloStatusExportItem(
+                      stt: row.siloId,
+                      siloName: row.displayName,
+                      weightText: weightStr,
+                      levelText: levelStr,
+                      status: row.status,
+                      updatedAt: nowString,
+                    );
+                  }).toList();
+
+                  await widget.onExportExcel!(exportItems);
+                }
               },
               icon: const Icon(Icons.table_view, size: 18),
               label: const Text('Xuất excel'),
