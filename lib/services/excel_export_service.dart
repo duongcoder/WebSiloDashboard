@@ -34,11 +34,39 @@ class SiloStatusExportItem {
   });
 }
 
+class SiloAlertExportItem {
+  final int stt;
+  final String siloName;
+  final String alertType;
+  final String severity;
+  final String timestamp;
+  final String status;
+
+  const SiloAlertExportItem({
+    required this.stt,
+    required this.siloName,
+    required this.alertType,
+    required this.severity,
+    required this.timestamp,
+    required this.status,
+  });
+}
+
 Future<ExcelExportResult> exportSiloStatusToExcel({
   required List<SiloStatusExportItem> items,
   String? downloadFileName,
 }) {
   return impl.exportSiloStatusToExcel(
+    items: items,
+    downloadFileName: downloadFileName,
+  );
+}
+
+Future<ExcelExportResult> exportAlertsToExcel({
+  required List<SiloAlertExportItem> items,
+  String? downloadFileName,
+}) {
+  return impl.exportAlertsToExcel(
     items: items,
     downloadFileName: downloadFileName,
   );

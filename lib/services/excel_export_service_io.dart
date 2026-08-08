@@ -490,3 +490,238 @@ Future<ExcelExportResult> exportPlanRowsToExcel({
     );
   }
 }
+
+Future<ExcelExportResult> exportAlertsToExcel({
+  required List<SiloAlertExportItem> items,
+  String? downloadFileName,
+}) async {
+  try {
+    final now = DateTime.now();
+    final day = _twoDigits(now.day);
+    final month = _twoDigits(now.month);
+    final year = now.year.toString();
+    final hour = _twoDigits(now.hour);
+    final minute = _twoDigits(now.minute);
+    final second = _twoDigits(now.second);
+
+    final encoded = _buildAlertsExcel(items: items);
+    if (encoded == null) {
+      return const ExcelExportResult(
+        success: false,
+        message: 'Không thể tạo dữ liệu Excel.',
+      );
+    }
+
+    final exportsDirPath =
+        '${Directory.current.path}${Platform.pathSeparator}exports${Platform.pathSeparator}$day${Platform.pathSeparator}$month${Platform.pathSeparator}$year';
+    final exportsDir = Directory(exportsDirPath);
+    if (!await exportsDir.exists()) {
+      await exportsDir.create(recursive: true);
+    }
+
+    final defaultFileName = 'CanhBao_$day-$month-${year}_$hour-$minute-$second.xlsx';
+    final fileName =
+        (downloadFileName != null && downloadFileName.trim().isNotEmpty)
+            ? downloadFileName.trim()
+            : defaultFileName;
+    final filePath = '${exportsDir.path}${Platform.pathSeparator}$fileName';
+
+    final file = File(filePath);
+    await file.writeAsBytes(encoded, flush: true);
+
+    return ExcelExportResult(
+      success: true,
+      message: 'Đã xuất Excel: $filePath',
+      filePath: filePath,
+    );
+  } catch (e) {
+    return ExcelExportResult(
+      success: false,
+      message: 'Xuất Excel thất bại: $e',
+    );
+  }
+}
+
+List<int>? _buildAlertsExcel({
+  required List<SiloAlertExportItem> items,
+}) {
+  final excel = Excel.createExcel();
+  final sheet = excel['Sheet1'];
+
+  final borderGrid = Border(
+    borderStyle: BorderStyle.Thin,
+    borderColorHex: ExcelColor.fromHexString('#D1D5DB'),
+  );
+
+  final titleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#1E3A8A'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 16,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final subTitleStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#F1F5F9'),
+    fontColorHex: ExcelColor.fromHexString('#334155'),
+    fontSize: 11,
+    italic: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final headerStyle = CellStyle(
+    backgroundColorHex: ExcelColor.fromHexString('#2563EB'),
+    fontColorHex: ExcelColor.white,
+    fontSize: 12,
+    bold: true,
+    horizontalAlign: HorizontalAlign.Center,
+    verticalAlign: VerticalAlign.Center,
+    leftBorder: borderGrid,
+    rightBorder: borderGrid,
+    topBorder: borderGrid,
+    bottomBorder: borderGrid,
+  );
+
+  final now = DateTime.now();
+  final timeStr =
+      '${_twoDigits(now.day)}/${_twoDigits(now.month)}/${now.year} ${_twoDigits(now.hour)}:${_twoDigits(now.minute)}';
+
+  // Row 0: Title Block (Merged A1:F1)
+  final titleStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0);
+  final titleEnd = CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: 0);
+  sheet.merge(
+    titleStart,
+    titleEnd,
+    customValue: TextCellValue('DANH SÁCH CẢNH BÁO HỆ THỐNG SILO - FEEDFARM'),
+  );
+  sheet.setMergedCellStyle(titleStart, titleStyle);
+
+  // Row 1: Sub-header Block (Merged A2:F2)
+  final subStart = CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1);
+  final subEnd = CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: 1);
+  sheet.merge(
+    subStart,
+    subEnd,
+    customValue: TextCellValue(
+      'Thời gian xuất: $timeStr | Tổng số cảnh báo: ${items.length}',
+    ),
+  );
+  sheet.setMergedCellStyle(subStart, subTitleStyle);
+
+  // Row 2: Headers
+  final headers = [
+    'STT',
+    'Silo / Thiết bị',
+    'Loại cảnh báo',
+    'Mức độ',
+    'Thời gian ghi nhận',
+    'Trạng thái xử lý',
+  ];
+
+  for (var col = 0; col < headers.length; col++) {
+    final cell = sheet.cell(
+      CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 2),
+    );
+    cell.value = TextCellValue(headers[col]);
+    cell.cellStyle = headerStyle;
+  }
+
+  final colWidths = <double>[10.0, 18.0, 22.0, 18.0, 26.0, 20.0];
+
+  for (var i = 0; i < items.length; i++) {
+    final item = items[i];
+    final rowIndex = 3 + i;
+
+    ExcelColor severityColor = ExcelColor.fromHexString('#2563EB');
+    if (item.severity == 'Nguy hiểm') {
+      severityColor = ExcelColor.fromHexString('#DC2626');
+    } else if (item.severity == 'Cảnh báo') {
+      severityColor = ExcelColor.fromHexString('#D97706');
+    }
+
+    final dataCells = [
+      (
+        0,
+        TextCellValue('${item.stt}'),
+        HorizontalAlign.Center,
+        ExcelColor.fromHexString('#0F172A'),
+        false
+      ),
+      (
+        1,
+        TextCellValue(item.siloName),
+        HorizontalAlign.Left,
+        ExcelColor.fromHexString('#0F172A'),
+        true
+      ),
+      (
+        2,
+        TextCellValue(item.alertType),
+        HorizontalAlign.Left,
+        ExcelColor.fromHexString('#334155'),
+        false
+      ),
+      (
+        3,
+        TextCellValue(item.severity),
+        HorizontalAlign.Center,
+        severityColor,
+        true
+      ),
+      (
+        4,
+        TextCellValue(item.timestamp),
+        HorizontalAlign.Center,
+        ExcelColor.fromHexString('#475569'),
+        false
+      ),
+      (
+        5,
+        TextCellValue(item.status),
+        HorizontalAlign.Center,
+        item.status == 'Đã xác nhận'
+            ? ExcelColor.fromHexString('#16A34A')
+            : ExcelColor.fromHexString('#D97706'),
+        true
+      ),
+    ];
+
+    for (final (col, val, align, color, bold) in dataCells) {
+      final cell = sheet.cell(
+        CellIndex.indexByColumnRow(columnIndex: col, rowIndex: rowIndex),
+      );
+      cell.value = val;
+      cell.cellStyle = CellStyle(
+        fontColorHex: color,
+        bold: bold,
+        horizontalAlign: align,
+        verticalAlign: VerticalAlign.Center,
+        leftBorder: borderGrid,
+        rightBorder: borderGrid,
+        topBorder: borderGrid,
+        bottomBorder: borderGrid,
+      );
+
+      final valLength = val.value.toString().length;
+      if (valLength + 4 > colWidths[col]) {
+        colWidths[col] = (valLength + 4).toDouble();
+      }
+    }
+  }
+
+  for (var col = 0; col < colWidths.length; col++) {
+    sheet.setColumnWidth(col, colWidths[col]);
+  }
+
+  return excel.encode();
+}

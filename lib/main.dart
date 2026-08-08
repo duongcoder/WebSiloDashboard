@@ -14,6 +14,7 @@ import 'utils/app_config.dart';
 import 'models/controller.dart';
 import 'models/indicator.dart';
 import 'models/silo.dart';
+import 'models/silo_alert_model.dart';
 import 'models/silo_history_model.dart';
 import 'services/scale_service.dart';
 import 'services/excel_export_service.dart';
@@ -135,6 +136,10 @@ late signalr_core.HubConnection hubConnection;
   Timer? _currentUserSyncTimer;
   DateTime? _lastReportExportAt;
   DateTime? _lastRealtimeWeightUpdatedAt;
+
+  final Set<String> _acknowledgedAlertKeys = <String>{};
+  String _selectedAlertSiloFilter = 'Tất cả Silo';
+  String _selectedAlertSeverityFilter = 'Tất cả mức độ';
 
   @override
   void initState() {
@@ -1561,18 +1566,17 @@ hubConnection = signalr_core.HubConnectionBuilder()
     required double contentWidth,
   }) {
     _syncSilosWithLiveState();
+    final liveAlerts = _generateLiveAlerts();
 
     final totalWeightKg = _silos.fold<double>(0.0, (sum, s) => sum + s.weight);
     final totalMassTons = totalWeightKg / 1000.0;
     final activeSilosCount = _silos.where((s) => s.weight > 0).length;
     final lowLevelCount = _silos.where((s) {
       final pct = s.level * 100;
-      return pct >= 20.0 && pct <= 50.0;
+      return pct >= 20.0 && pct <= 30.0;
     }).length;
-    final warningCount = _silos.where((s) {
-      final pct = s.level * 100;
-      return pct < 20.0;
-    }).length;
+    final warningCount = liveAlerts.length;
+    final unhandledCount = liveAlerts.where((a) => !a.isAcknowledged).length;
     const double consumedTodayTons = 0.0;
 
     final stats = <Map<String, dynamic>>[
@@ -1599,7 +1603,7 @@ hubConnection = signalr_core.HubConnectionBuilder()
         'value': '$warningCount cảnh báo',
         'color': const Color(0xFFEF4444),
         'icon': Icons.notifications_active_outlined,
-        'isWarning': true,
+        'isWarning': unhandledCount > 0,
       },
       {
         'title': 'Lượng ăn hôm nay',
@@ -1931,7 +1935,121 @@ hubConnection = signalr_core.HubConnectionBuilder()
   }
 
 
+  List<SiloAlertModel> _generateLiveAlerts() {
+    _syncSilosWithLiveState();
+    final alerts = <SiloAlertModel>[];
+    final now = DateTime.now();
+
+    for (var i = 0; i < _silos.length; i++) {
+      final silo = _silos[i];
+      final siloIdNum = _extractSiloId(silo.id, fallback: i + 1);
+      final siloDisplayName = 'Silo $siloIdNum';
+      final maxWeight = _getSiloMaxWeight(siloIdNum);
+      final weight = silo.weight;
+      final fillPct = maxWeight > 0 ? (weight / maxWeight * 100).clamp(0.0, 100.0) : 0.0;
+      final lastUpdate = _getLatestTimestampForSilo(siloIdNum);
+
+      // 1. Critical Low Alert (< 20%)
+      if (fillPct < 20.0 && weight > 0) {
+        final alertKey = '${siloDisplayName}_Rất thấp';
+        final isAck = _acknowledgedAlertKeys.contains(alertKey);
+        alerts.add(SiloAlertModel(
+          stt: alerts.length + 1,
+          siloId: siloDisplayName,
+          alertType: 'Rất thấp',
+          severity: 'Nguy hiểm',
+          timestamp: lastUpdate ?? now,
+          status: isAck ? 'Đã xác nhận' : 'Chưa xử lý',
+          message: '$siloDisplayName sắp hết nguyên liệu (<20%)',
+          isAcknowledged: isAck,
+        ));
+      }
+      // 2. Low Level Alert (20% - 30%)
+      else if (fillPct >= 20.0 && fillPct <= 30.0) {
+        final alertKey = '${siloDisplayName}_Mức thấp';
+        final isAck = _acknowledgedAlertKeys.contains(alertKey);
+        alerts.add(SiloAlertModel(
+          stt: alerts.length + 1,
+          siloId: siloDisplayName,
+          alertType: 'Mức thấp',
+          severity: 'Cảnh báo',
+          timestamp: lastUpdate ?? now,
+          status: isAck ? 'Đã xác nhận' : 'Chưa xử lý',
+          message: '$siloDisplayName mức nguyên liệu thấp (${fillPct.toStringAsFixed(1)}%)',
+          isAcknowledged: isAck,
+        ));
+      }
+      // 3. Offline / No Data Alert (weight <= 0)
+      else if (weight <= 0) {
+        final alertKey = '${siloDisplayName}_Lỗi kết nối';
+        final isAck = _acknowledgedAlertKeys.contains(alertKey);
+        alerts.add(SiloAlertModel(
+          stt: alerts.length + 1,
+          siloId: siloDisplayName,
+          alertType: 'Lỗi kết nối',
+          severity: 'Thông tin',
+          timestamp: lastUpdate ?? now,
+          status: isAck ? 'Đã xác nhận' : 'Chưa xử lý',
+          message: 'Cảm biến $siloDisplayName mất kết nối hoặc không có dữ liệu',
+          isAcknowledged: isAck,
+        ));
+      }
+    }
+
+    return List<SiloAlertModel>.generate(
+      alerts.length,
+      (index) => alerts[index].copyWith(stt: index + 1),
+    );
+  }
+
+  Future<void> _exportAlertsReport(List<SiloAlertModel> filteredAlerts) async {
+    final exportItems = filteredAlerts.map((a) {
+      final dateStr =
+          '${a.timestamp.hour.toString().padLeft(2, '0')}:${a.timestamp.minute.toString().padLeft(2, '0')}:${a.timestamp.second.toString().padLeft(2, '0')} - ${a.timestamp.day.toString().padLeft(2, '0')}/${a.timestamp.month.toString().padLeft(2, '0')}/${a.timestamp.year}';
+      return SiloAlertExportItem(
+        stt: a.stt,
+        siloName: a.siloId,
+        alertType: a.alertType,
+        severity: a.severity,
+        timestamp: dateStr,
+        status: a.status,
+      );
+    }).toList(growable: false);
+
+    final result = await exportAlertsToExcel(items: exportItems);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
+
   Widget _buildWarningTabSection() {
+    final allAlerts = _generateLiveAlerts();
+    final siloOptions = <String>[
+      'Tất cả Silo',
+      ...List.generate(_totalSiloCount, (i) => 'Silo ${i + 1}'),
+    ];
+    final severityOptions = <String>[
+      'Tất cả mức độ',
+      'Nguy hiểm',
+      'Cảnh báo',
+      'Thông tin',
+    ];
+
+    final filteredAlerts = allAlerts.where((alert) {
+      if (_selectedAlertSiloFilter != 'Tất cả Silo' &&
+          alert.siloId != _selectedAlertSiloFilter) {
+        return false;
+      }
+      if (_selectedAlertSeverityFilter != 'Tất cả mức độ' &&
+          alert.severity != _selectedAlertSeverityFilter) {
+        return false;
+      }
+      return true;
+    }).toList(growable: false);
+
+    final unhandledCount = allAlerts.where((a) => !a.isAcknowledged).length;
+
     return Container(
       margin: const EdgeInsets.only(left: 0, right: 12, bottom: 12, top: 0),
       decoration: BoxDecoration(
@@ -1948,78 +2066,317 @@ hubConnection = signalr_core.HubConnectionBuilder()
       ),
       padding: const EdgeInsets.all(18),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // Header Row
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEE2E2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 22),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Color(0xFFEF4444),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Hệ thống Cảnh báo & Alerts',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Giám sát thời gian thực các nguy cơ cạn nguyên liệu và sự cố kết nối',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Lịch sử cảnh báo hệ thống',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                        color: Color(0xFF0F172A),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: unhandledCount > 0
+                          ? const Color(0xFFFEF2F2)
+                          : const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: unhandledCount > 0
+                            ? const Color(0xFFFCA5A5)
+                            : const Color(0xFF86EFAC),
                       ),
                     ),
-                    Text(
-                      'Giám sát các sự cố vượt ngưỡng cân và gián đoạn kết nối',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    child: Text(
+                      '$unhandledCount chưa xử lý / ${allAlerts.length} tổng số',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: unhandledCount > 0
+                            ? const Color(0xFF991B1B)
+                            : const Color(0xFF166534),
+                      ),
                     ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFFCA5A5)),
-                ),
-                child: const Text(
-                  '5 cảnh báo gần nhất',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF991B1B),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: () => _exportAlertsReport(filteredAlerts),
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Xuất Excel'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
           const SizedBox(height: 16),
-          const ListTile(
-            leading: Icon(Icons.error_outline, color: Color(0xFFEF4444)),
-            title: Text('Silo 2: Khối lượng đạt 95% sức chứa Max', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            subtitle: Text('Thời gian: 14:32:10 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
-            trailing: Chip(label: Text('Mức cao', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFFEF4444)),
+          // Filter Bar
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 160,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedAlertSiloFilter,
+                    items: siloOptions
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setState(() {
+                        _selectedAlertSiloFilter = val;
+                      });
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Lọc theo Silo',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 180,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedAlertSeverityFilter,
+                    items: severityOptions
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val == null) return;
+                      setState(() {
+                        _selectedAlertSeverityFilter = val;
+                      });
+                    },
+                    decoration: const InputDecoration(
+                      labelText: 'Lọc theo Mức độ',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          const Divider(height: 1),
-          const ListTile(
-            leading: Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B)),
-            title: Text('Silo 3: Mức nguyên liệu thấp (< 20%)', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            subtitle: Text('Thời gian: 11:15:42 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
-            trailing: Chip(label: Text('Cần nạp', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFFF59E0B)),
-          ),
-          const Divider(height: 1),
-          const ListTile(
-            leading: Icon(Icons.sensors_off_rounded, color: Color(0xFF64748B)),
-            title: Text('Cảm biến Silo 4: Gián đoạn tín hiệu SignalR tạm thời', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-            subtitle: Text('Thời gian: 08:05:00 - 29/07/2026', style: TextStyle(color: Color(0xFF64748B))),
-            trailing: Chip(label: Text('Đã tự khôi phục', style: TextStyle(color: Colors.white, fontSize: 11)), backgroundColor: Color(0xFF10B981)),
-          ),
+          const SizedBox(height: 16),
+          // Table or Empty View
+          if (filteredAlerts.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              alignment: Alignment.center,
+              child: const Column(
+                children: [
+                  Icon(Icons.check_circle_outline, color: Color(0xFF10B981), size: 48),
+                  SizedBox(height: 12),
+                  Text(
+                    'Không có cảnh báo nào phù hợp với bộ lọc',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.resolveWith(
+                  (states) => const Color(0xFFF1F5F9),
+                ),
+                dataRowMinHeight: 52,
+                dataRowMaxHeight: 64,
+                columns: const [
+                  DataColumn(label: Text('STT', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                  DataColumn(label: Text('Silo / Thiết bị', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                  DataColumn(label: Text('Loại cảnh báo', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                  DataColumn(label: Text('Mức độ', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                  DataColumn(label: Text('Thời gian ghi nhận', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                  DataColumn(label: Text('Trạng thái xử lý', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)))),
+                ],
+                rows: filteredAlerts.map((alert) {
+                  final dayStr = alert.timestamp.day.toString().padLeft(2, '0');
+                  final monthStr = alert.timestamp.month.toString().padLeft(2, '0');
+                  final timeStr =
+                      '${alert.timestamp.hour.toString().padLeft(2, '0')}:${alert.timestamp.minute.toString().padLeft(2, '0')}:${alert.timestamp.second.toString().padLeft(2, '0')} - $dayStr/$monthStr/${alert.timestamp.year}';
+
+                  Widget severityPill;
+                  if (alert.severity == 'Nguy hiểm') {
+                    severityPill = Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.error_outline, size: 14, color: Color(0xFFDC2626)),
+                          SizedBox(width: 4),
+                          Text('Nguy hiểm', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 11)),
+                        ],
+                      ),
+                    );
+                  } else if (alert.severity == 'Cảnh báo') {
+                    severityPill = Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
+                          SizedBox(width: 4),
+                          Text('Cảnh báo', style: TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.bold, fontSize: 11)),
+                        ],
+                      ),
+                    );
+                  } else {
+                    severityPill = Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.info_outline, size: 14, color: Color(0xFF2563EB)),
+                          SizedBox(width: 4),
+                          Text('Thông tin', style: TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 11)),
+                        ],
+                      ),
+                    );
+                  }
+
+                  Widget statusWidget;
+                  if (alert.isAcknowledged) {
+                    statusWidget = Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFA7F3D0)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle, size: 14, color: Color(0xFF047857)),
+                          SizedBox(width: 4),
+                          Text('Đã xác nhận', style: TextStyle(color: Color(0xFF047857), fontWeight: FontWeight.bold, fontSize: 11)),
+                        ],
+                      ),
+                    );
+                  } else {
+                    statusWidget = ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _acknowledgedAlertKeys.add('${alert.siloId}_${alert.alertType}');
+                        });
+                      },
+                      icon: const Icon(Icons.check, size: 14),
+                      label: const Text('Xác nhận'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF59E0B),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return DataRow(
+                    cells: [
+                      DataCell(Text('${alert.stt}', style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF64748B)))),
+                      DataCell(Text(alert.siloId, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A)))),
+                      DataCell(
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(alert.alertType, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                            Text(alert.message, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                          ],
+                        ),
+                      ),
+                      DataCell(severityPill),
+                      DataCell(Text(timeStr, style: const TextStyle(fontSize: 12, color: Color(0xFF475569)))),
+                      DataCell(statusWidget),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
         ],
       ),
     );
@@ -2672,25 +3029,27 @@ hubConnection = signalr_core.HubConnectionBuilder()
                       Stack(
                         children: [
                           IconButton(
-                            onPressed: () {},
+                            onPressed: () => _select(_warningTabIndex),
+                            tooltip: 'Cảnh báo hệ thống',
                             icon: const Icon(
                               Icons.notifications_none_rounded,
                               color: Color(0xFF475569),
                               size: 26,
                             ),
                           ),
-                          Positioned(
-                            right: 8,
-                            top: 8,
-                            child: Container(
-                              width: 9,
-                              height: 9,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Color(0xFFEF4444),
+                          if (_generateLiveAlerts().any((a) => !a.isAcknowledged))
+                            Positioned(
+                              right: 8,
+                              top: 8,
+                              child: Container(
+                                width: 9,
+                                height: 9,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Color(0xFFEF4444),
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                       const SizedBox(width: 16),

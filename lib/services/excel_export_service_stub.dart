@@ -11,6 +11,16 @@ Future<ExcelExportResult> exportSiloStatusToExcel({
   );
 }
 
+Future<ExcelExportResult> exportAlertsToExcel({
+  required List<SiloAlertExportItem> items,
+  String? downloadFileName,
+}) async {
+  return const ExcelExportResult(
+    success: false,
+    message: 'Nền tảng hiện tại chưa hỗ trợ lưu file Excel vào thư mục dự án.',
+  );
+}
+
 Future<ExcelExportResult> exportStatisticsReportToExcel({
   required String filePrefix,
   required List<CompressedStatisticsReportItem> rows,
